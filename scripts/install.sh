@@ -50,7 +50,7 @@ INSTALLED_VERSION=""
 
 if [[ -f "$VERSION_FILE" ]]; then
     IS_UPDATE=true
-    INSTALLED_VERSION="$(cat "$VERSION_FILE" | tr -d '[:space:]')"
+    INSTALLED_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 fi
 
 # ─── Header ──────────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ if [[ "$REMOTE_INSTALL" == "true" ]]; then
 else
     # Local clone: read version from VERSION file in repo
     if [[ -f "${BASE_DIR}/VERSION" ]]; then
-        LOCAL_FILE_VERSION="$(cat "${BASE_DIR}/VERSION" | tr -d '[:space:]')"
+        LOCAL_FILE_VERSION="$(tr -d '[:space:]' < "${BASE_DIR}/VERSION")"
         RESOLVED_TAG="v${LOCAL_FILE_VERSION#v}"
     fi
 fi
@@ -243,7 +243,7 @@ fi
 
 # ─── Success message ──────────────────────────────────────────────────────────
 
-FINAL_VERSION="$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]')"
+FINAL_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE" 2>/dev/null)"
 
 echo ""
 if [[ "$IS_UPDATE" == "true" ]]; then
