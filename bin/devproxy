@@ -1,0 +1,563 @@
+#!/bin/bash
+# bin/devproxy
+# Main entry point for local-dev-proxy
+
+set -e
+
+# Determine script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Load configuration
+if [[ -f "${BASE_DIR}/config/default.conf" ]]; then
+    source "${BASE_DIR}/config/default.conf"
+fi
+
+# Load user configuration if exists
+if [[ -f "$HOME/.local-dev-proxy.conf" ]]; then
+    source "$HOME/.local-dev-proxy.conf"
+fi
+
+# Load libraries
+for lib in "${LIB_DIR}"/*.sh; do
+    if [[ -f "$lib" ]]; then
+        source "$lib"
+    fi
+done
+
+# Ensure required directories exist
+ensure_directory "$CERT_DIR"
+ensure_directory "$SITE_ENABLED_DIR"
+ensure_directory "$TEMPLATE_DIR"
+ensure_directory "$(dirname "$LOG_FILE")"
+
+# Display usage information
+usage() {
+    cat << EOF
+Usage: devproxy [COMMAND] [OPTIONS]
+
+Local Development Proxy - Manage domains, SSL certificates and Nginx configurations
+
+COMMANDS:
+    create              Create a new domain with configuration
+    remove              Remove a domain and its configuration
+
+    cert                Certificate management commands
+        generate        Generate SSL certificate
+        remove          Remove SSL certificate
+        list            List all certificates
+
+    hosts               Hosts file management commands
+        add             Add entry to hosts file
+        remove          Remove entry from hosts file
+        list            List hosts file entries
+
+    nginx               Nginx management commands
+        create-site     Create site configuration
+        remove-site     Remove site configuration
+        list            List all site configurations
+        test            Test Nginx configuration
+        reload          Reload Nginx
+
+    mode                Show or change proxy mode (docker/local/auto)
+    config              Show current configuration
+    help                Show this help message
+
+OPTIONS:
+    -h, --host DOMAIN       Domain name
+    -p, --port PORT         Port number
+    -i, --ip IP             IP address (default: 127.0.0.1)
+    -s, --subdomain         Is subdomain (requires -m)
+    -m, --main-domain       Main domain (for subdomain)
+    --no-ssl                Create domain without SSL
+    --ssl                   Create domain with SSL (default)
+    --template PATH         Custom Nginx template path
+    --mode MODE             Proxy mode: docker, local, or auto
+    --help                  Show help message
+
+EXAMPLES:
+    # Create domain with SSL (default)
+    devproxy create -h myapp.local -p 3000
+
+    # Create domain without SSL
+    devproxy create -h myapp.local -p 3000 --no-ssl
+
+    # Create subdomain (shares certificate with main domain)
+    devproxy create -h api.myapp.local -p 8080 -s -m myapp.local
+
+    # Create domain with custom template
+    devproxy create -h myapp.local -p 3000 --template /path/to/custom.stub
+
+    # Use specific proxy mode
+    devproxy create -h myapp.local -p 3000 --mode local
+
+    # Generate certificate only
+    devproxy cert generate -h myapp.local
+
+    # Add to hosts file
+    sudo devproxy hosts add -h myapp.local -i 127.0.0.1
+
+    # Check current mode
+    devproxy mode
+
+    # Show configuration
+    devproxy config
+
+For more information, visit: https://github.com/mohamadtsn/local-dev-proxy
+EOF
+}
+
+# Parse command line arguments
+parse_args() {
+    COMMAND=""
+    SUBCOMMAND=""
+    HOST=""
+    PORT=""
+    IP="$DEFAULT_IP"
+    IS_SUBDOMAIN=false
+    MAIN_DOMAIN=""
+    SSL_ENABLED="$DEFAULT_SSL_ENABLED"
+    CUSTOM_TEMPLATE=""
+    FORCE_MODE=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            create|remove|cert|hosts|nginx|mode|config|help)
+                COMMAND="$1"
+                shift
+                if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
+                    SUBCOMMAND="$1"
+                    shift
+                fi
+                ;;
+            -h|--host)
+                HOST="$2"
+                shift 2
+                ;;
+            -p|--port)
+                PORT="$2"
+                shift 2
+                ;;
+            -i|--ip)
+                IP="$2"
+                shift 2
+                ;;
+            -s|--subdomain)
+                IS_SUBDOMAIN=true
+                shift
+                ;;
+            -m|--main-domain)
+                MAIN_DOMAIN="$2"
+                shift 2
+                ;;
+            --no-ssl)
+                SSL_ENABLED=false
+                shift
+                ;;
+            --ssl)
+                SSL_ENABLED=true
+                shift
+                ;;
+            --template)
+                CUSTOM_TEMPLATE="$2"
+                shift 2
+                ;;
+            --mode)
+                FORCE_MODE="$2"
+                shift 2
+                ;;
+            --help)
+                usage
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Execute command
+execute_command() {
+    case "$COMMAND" in
+        create)
+            cmd_create_domain
+            ;;
+        remove)
+            cmd_remove_domain
+            ;;
+        cert)
+            cmd_certificate
+            ;;
+        hosts)
+            cmd_hosts
+            ;;
+        nginx)
+            cmd_nginx
+            ;;
+        mode)
+            cmd_mode
+            ;;
+        config)
+            cmd_show_config
+            ;;
+        help|"")
+            usage
+            ;;
+        *)
+            error "Unknown command: $COMMAND"
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+# Command: Create domain
+cmd_create_domain() {
+    # Override proxy mode if specified
+    if [[ -n "$FORCE_MODE" ]]; then
+        export PROXY_MODE="$FORCE_MODE"
+    fi
+
+    # Override template if specified
+    if [[ -n "$CUSTOM_TEMPLATE" ]]; then
+        export CUSTOM_TEMPLATE_PATH="$CUSTOM_TEMPLATE"
+    fi
+
+    if [[ -z "$HOST" ]]; then
+        read -p "Enter domain name: " HOST
+    fi
+
+    if [[ -z "$PORT" ]]; then
+        read -p "Enter port number: " PORT
+    fi
+
+    if [[ -z "$HOST" ]] || [[ -z "$PORT" ]]; then
+        error "Domain and port are required"
+        exit 1
+    fi
+
+    # Determine certificate domain
+    local cert_domain="$HOST"
+    if $IS_SUBDOMAIN && [[ -n "$MAIN_DOMAIN" ]]; then
+        cert_domain="$MAIN_DOMAIN"
+        info "Using main domain certificate: $cert_domain"
+    fi
+
+    # Show configuration
+    info "Creating domain: $HOST"
+    info "Port: $PORT"
+    info "IP: $IP"
+    info "SSL Enabled: $SSL_ENABLED"
+    info "Proxy Mode: $(determine_proxy_mode)"
+
+    # Generate certificate if SSL is enabled
+    if [[ "$SSL_ENABLED" == "true" ]]; then
+        info "Certificate domain: $cert_domain"
+
+        # Check if certificate already exists
+        if [[ -f "${CERT_DIR}/${cert_domain}.crt" ]]; then
+            warning "Certificate already exists for: $cert_domain"
+            if ! confirm "Regenerate certificate?"; then
+                info "Using existing certificate"
+            else
+                if ! generate_certificate "$cert_domain"; then
+                    error "Failed to generate certificate"
+                    exit 1
+                fi
+            fi
+        else
+            if ! generate_certificate "$cert_domain"; then
+                error "Failed to generate certificate"
+                exit 1
+            fi
+        fi
+    else
+        info "Skipping certificate generation (SSL disabled)"
+    fi
+
+    # Create nginx configuration
+    if ! create_site_config "$HOST" "$PORT" "$cert_domain" "$SSL_ENABLED"; then
+        error "Failed to create site configuration"
+        exit 1
+    fi
+
+    # Add to hosts file
+    if check_root; then
+        add_host "$IP" "$HOST"
+    else
+        warning "Skipping hosts file update (requires root)"
+        info "Run manually: sudo devproxy hosts add -h $HOST -i $IP"
+    fi
+
+    success "Domain created successfully: $HOST"
+
+    if [[ "$SSL_ENABLED" == "true" ]]; then
+        info "Access your site at: https://$HOST"
+    else
+        info "Access your site at: http://$HOST"
+    fi
+}
+
+# Command: Remove domain
+cmd_remove_domain() {
+    if [[ -z "$HOST" ]]; then
+        read -p "Enter domain name to remove: " HOST
+    fi
+
+    if [[ -z "$HOST" ]]; then
+        error "Domain is required"
+        exit 1
+    fi
+
+    info "Removing domain: $HOST"
+
+    if ! confirm "Are you sure you want to remove $HOST?"; then
+        info "Operation cancelled"
+        exit 0
+    fi
+
+    # Remove nginx configuration
+    remove_site_config "$HOST"
+
+    # Ask about certificate removal
+    if [[ -f "${CERT_DIR}/${HOST}.crt" ]]; then
+        if confirm "Remove SSL certificate for $HOST?"; then
+            remove_certificate "$HOST"
+        fi
+    fi
+
+    # Remove from hosts file
+    if check_root; then
+        if confirm "Remove from hosts file?"; then
+            remove_host "$HOST"
+        fi
+    else
+        warning "Skipping hosts file update (requires root)"
+        info "Run manually: sudo devproxy hosts remove -h $HOST"
+    fi
+
+    success "Domain removed successfully: $HOST"
+}
+
+# Command: Certificate management
+cmd_certificate() {
+    case "$SUBCOMMAND" in
+        generate)
+            if [[ -z "$HOST" ]]; then
+                read -p "Enter domain name: " HOST
+            fi
+            generate_certificate "$HOST"
+            ;;
+        remove)
+            if [[ -z "$HOST" ]]; then
+                read -p "Enter domain name: " HOST
+            fi
+            if confirm "Remove certificate for $HOST?"; then
+                remove_certificate "$HOST"
+            fi
+            ;;
+        list)
+            list_certificates
+            ;;
+        *)
+            error "Unknown certificate subcommand: $SUBCOMMAND"
+            echo "Available subcommands: generate, remove, list"
+            exit 1
+            ;;
+    esac
+}
+
+# Command: Hosts management
+cmd_hosts() {
+    case "$SUBCOMMAND" in
+        add)
+            if [[ -z "$HOST" ]]; then
+                read -p "Enter hostname: " HOST
+            fi
+            add_host "$IP" "$HOST"
+            ;;
+        remove)
+            if [[ -z "$HOST" ]]; then
+                read -p "Enter hostname or IP: " HOST
+            fi
+            if confirm "Remove $HOST from hosts file?"; then
+                remove_host "$HOST"
+            fi
+            ;;
+        list)
+            list_hosts
+            ;;
+        *)
+            manage_hosts
+            ;;
+    esac
+}
+
+# Command: Nginx management
+cmd_nginx() {
+    case "$SUBCOMMAND" in
+        create-site)
+            if [[ -z "$HOST" ]]; then
+                read -p "Enter domain name: " HOST
+            fi
+            if [[ -z "$PORT" ]]; then
+                read -p "Enter port number: " PORT
+            fi
+
+            # Ask about SSL
+            if confirm "Enable SSL for this site?" "y"; then
+                SSL_ENABLED=true
+            else
+                SSL_ENABLED=false
+            fi
+
+            create_site_config "$HOST" "$PORT" "$HOST" "$SSL_ENABLED"
+            ;;
+        remove-site)
+            if [[ -z "$HOST" ]]; then
+                read -p "Enter domain name: " HOST
+            fi
+            if confirm "Remove site configuration for $HOST?"; then
+                remove_site_config "$HOST"
+            fi
+            ;;
+        list)
+            list_site_configs
+            ;;
+        test)
+            test_nginx_config
+            ;;
+        reload)
+            reload_nginx
+            ;;
+        *)
+            error "Unknown nginx subcommand: $SUBCOMMAND"
+            echo "Available subcommands: create-site, remove-site, list, test, reload"
+            exit 1
+            ;;
+    esac
+}
+
+# Command: Mode management
+cmd_mode() {
+    if [[ -n "$FORCE_MODE" ]]; then
+        # Set mode
+        case "$FORCE_MODE" in
+            docker|local|auto)
+                info "Setting proxy mode to: $FORCE_MODE"
+
+                # Update user config
+                local config_file="$HOME/.local-dev-proxy.conf"
+                if [[ -f "$config_file" ]]; then
+                    sed -i.bak "s/^export PROXY_MODE=.*/export PROXY_MODE=\"$FORCE_MODE\"/" "$config_file"
+                else
+                    echo "export PROXY_MODE=\"$FORCE_MODE\"" > "$config_file"
+                fi
+
+                success "Proxy mode set to: $FORCE_MODE"
+                info "This will take effect for new commands"
+                ;;
+            *)
+                error "Invalid mode: $FORCE_MODE"
+                echo "Valid modes: docker, local, auto"
+                exit 1
+                ;;
+        esac
+    else
+        # Show current mode
+        local current_mode=$(determine_proxy_mode)
+        info "Current proxy mode: $current_mode"
+        info "Configured mode: $PROXY_MODE"
+
+        echo ""
+        echo "Available modes:"
+        echo "  docker - Use Docker container for Nginx"
+        echo "  local  - Use system Nginx installation"
+        echo "  auto   - Auto-detect (prefer Docker if available)"
+        echo ""
+        echo "To change mode: devproxy mode --mode <docker|local|auto>"
+    fi
+}
+
+# Command: Show configuration
+cmd_show_config() {
+    local current_mode=$(determine_proxy_mode 2>/dev/null || echo "N/A")
+
+    cat << EOF
+${COLOR_CYAN}â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+                    Local Dev Proxy Configuration
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•${COLOR_RESET}
+
+${COLOR_BLUE}General Settings:${COLOR_RESET}
+  Base Directory:     $BASE_DIR
+  Proxy Mode:         $PROXY_MODE (current: $current_mode)
+  Auto Reload:        $AUTO_RELOAD
+  Backup Configs:     $BACKUP_CONFIGS
+
+${COLOR_BLUE}Directories:${COLOR_RESET}
+  Certificates:       $CERT_DIR
+  Sites Enabled:      $SITE_ENABLED_DIR
+  Templates:          $TEMPLATE_DIR
+  Config:             $CONFIG_DIR
+  Libraries:          $LIB_DIR
+
+${COLOR_BLUE}Docker Settings:${COLOR_RESET}
+  Container Name:     $DOCKER_CONTAINER_NAME
+  Host Access:        $DOCKER_HOST_ACCESS
+  Custom Host IP:     $DOCKER_CUSTOM_HOST_IP
+  SSL Path:           $DOCKER_SSL_PATH
+  Config Path:        $DOCKER_CONF_PATH
+  Status:             $(is_docker_container_running "$DOCKER_CONTAINER_NAME" 2>/dev/null && echo "${COLOR_GREEN}Running${COLOR_RESET}" || echo "${COLOR_RED}Not Running${COLOR_RESET}")
+
+${COLOR_BLUE}Local Nginx Settings:${COLOR_RESET}
+  Config Directory:   $NGINX_CONF_DIR
+  Enabled Directory:  $NGINX_ENABLED_DIR
+  SSL Directory:      $NGINX_SSL_DIR
+  Binary:             $NGINX_BIN
+  Use Systemd:        $USE_SYSTEMD
+  Status:             $(command_exists "$NGINX_BIN" && echo "${COLOR_GREEN}Installed${COLOR_RESET}" || echo "${COLOR_RED}Not Installed${COLOR_RESET}")
+
+${COLOR_BLUE}SSL Certificate:${COLOR_RESET}
+  Country:            $SSL_COUNTRY
+  State:              $SSL_STATE
+  City:               $SSL_CITY
+  Organization:       $SSL_ORGANIZATION
+  Organization Unit:  $SSL_ORGANIZATION_UNIT
+  Email:              $SSL_EMAIL
+  Validity Days:      $SSL_VALIDITY_DAYS
+  Key Size:           $SSL_KEY_SIZE
+
+${COLOR_BLUE}Template Configuration:${COLOR_RESET}
+  Default Template:   $DEFAULT_TEMPLATE
+  Custom Template:    ${CUSTOM_TEMPLATE_PATH:-Not set}
+
+${COLOR_BLUE}Defaults:${COLOR_RESET}
+  IP Address:         $DEFAULT_IP
+  SSL Enabled:        $DEFAULT_SSL_ENABLED
+
+${COLOR_BLUE}System:${COLOR_RESET}
+  Operating System:   $(detect_os)
+  Hosts File:         $HOSTS_FILE
+  Log File:           $LOG_FILE
+
+${COLOR_BLUE}User Configuration:${COLOR_RESET}
+  Location:           ~/.local-dev-proxy.conf
+  Exists:             $([[ -f "$HOME/.local-dev-proxy.conf" ]] && echo "${COLOR_GREEN}Yes${COLOR_RESET}" || echo "${COLOR_YELLOW}No${COLOR_RESET}")
+
+${COLOR_CYAN}â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•${COLOR_RESET}
+
+To override settings, edit: ${COLOR_CYAN}~/.local-dev-proxy.conf${COLOR_RESET}
+
+EOF
+}
+
+# Main execution
+main() {
+    parse_args "$@"
+    execute_command
+}
+
+main "$@"
