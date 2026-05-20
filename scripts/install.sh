@@ -11,14 +11,8 @@ COLOR_GREEN='\033[1;32m'
 COLOR_BLUE='\033[1;34m'
 COLOR_YELLOW='\033[1;33m'
 COLOR_RED='\033[1;31m'
+COLOR_CYAN='\033[1;36m'
 COLOR_RESET='\033[0m'
-
-print_header() {
-    echo -e "${COLOR_BLUE}════════════════════════════════════════════════════════════════"
-    echo "           Installing Local Dev Proxy"
-    echo -e "════════════════════════════════════════════════════════════════${COLOR_RESET}"
-    echo ""
-}
 
 # Detect platform
 OS_TYPE="$(uname -s 2>/dev/null)"
@@ -41,12 +35,38 @@ else
 fi
 
 BIN_LINK="${BIN_DIR}/devproxy"
+VERSION_FILE="${INSTALL_DIR}/VERSION"
 
 # Root check (skip on Windows Git Bash)
 if [[ "$USE_SUDO" == "true" ]] && [[ $EUID -ne 0 ]]; then
     echo -e "${COLOR_YELLOW}This script must be run as root (use sudo)${COLOR_RESET}"
     exit 1
 fi
+
+# ─── Detect existing installation ────────────────────────────────────────────
+
+IS_UPDATE=false
+INSTALLED_VERSION=""
+
+if [[ -f "$VERSION_FILE" ]]; then
+    IS_UPDATE=true
+    INSTALLED_VERSION="$(cat "$VERSION_FILE" | tr -d '[:space:]')"
+fi
+
+# ─── Header ──────────────────────────────────────────────────────────────────
+
+print_header() {
+    if [[ "$IS_UPDATE" == "true" ]]; then
+        echo -e "${COLOR_CYAN}════════════════════════════════════════════════════════════════"
+        echo "              Updating Local Dev Proxy"
+        echo -e "════════════════════════════════════════════════════════════════${COLOR_RESET}"
+    else
+        echo -e "${COLOR_BLUE}════════════════════════════════════════════════════════════════"
+        echo "            Installing Local Dev Proxy"
+        echo -e "════════════════════════════════════════════════════════════════${COLOR_RESET}"
+    fi
+    echo ""
+}
 
 print_header
 
@@ -57,7 +77,8 @@ if [[ "$PLATFORM" == "windows" ]]; then
     echo ""
 fi
 
-# Detect if running from a local clone or remotely via curl
+# ─── Resolve source (local clone or remote) ──────────────────────────────────
+
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 if [[ "$SCRIPT_SOURCE" == "/dev/stdin" || -z "$SCRIPT_SOURCE" || "$SCRIPT_SOURCE" == "bash" ]]; then
     REMOTE_INSTALL=true
@@ -71,6 +92,10 @@ else
     fi
 fi
 
+# ─── Resolve new version tag ─────────────────────────────────────────────────
+
+RESOLVED_TAG=""
+
 if [[ "$REMOTE_INSTALL" == "true" ]]; then
     if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
         echo -e "${COLOR_RED}Error: curl or wget is required for remote installation${COLOR_RESET}"
@@ -80,8 +105,6 @@ if [[ "$REMOTE_INSTALL" == "true" ]]; then
     TMP_DIR="$(mktemp -d)"
     trap 'rm -rf "$TMP_DIR"' EXIT
 
-    # Resolve version: query GitHub API for latest release, fallback to branch
-    RESOLVED_TAG=""
     if [[ "$VERSION" == "latest" ]]; then
         echo "Checking latest release..."
         if command -v curl &>/dev/null; then
@@ -94,18 +117,65 @@ if [[ "$REMOTE_INSTALL" == "true" ]]; then
     elif [[ "$VERSION" != "master" ]]; then
         RESOLVED_TAG="$VERSION"
     fi
+else
+    # Local clone: read version from VERSION file in repo
+    if [[ -f "${BASE_DIR}/VERSION" ]]; then
+        LOCAL_FILE_VERSION="$(cat "${BASE_DIR}/VERSION" | tr -d '[:space:]')"
+        RESOLVED_TAG="v${LOCAL_FILE_VERSION#v}"
+    fi
+fi
 
+NEW_VERSION="${RESOLVED_TAG:-dev-${BRANCH}}"
+
+# ─── Update confirmation ─────────────────────────────────────────────────────
+
+if [[ "$IS_UPDATE" == "true" ]]; then
+    CURRENT_DISPLAY="${INSTALLED_VERSION:-unknown}"
+    NEW_DISPLAY="${NEW_VERSION}"
+
+    if [[ "$CURRENT_DISPLAY" == "$NEW_DISPLAY" ]] || \
+       [[ "v${CURRENT_DISPLAY#v}" == "${NEW_DISPLAY}" ]] || \
+       [[ "${CURRENT_DISPLAY}" == "${NEW_DISPLAY#v}" ]]; then
+        echo -e "  Installed : ${COLOR_GREEN}${CURRENT_DISPLAY}${COLOR_RESET}"
+        echo -e "  Available : ${COLOR_YELLOW}${NEW_DISPLAY}${COLOR_RESET} (same version)"
+        echo ""
+        read -r -p "  Same version is already installed. Continue anyway? [y/N]: " _confirm
+        _confirm="${_confirm:-n}"
+        if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
+            echo ""
+            echo -e "  ${COLOR_YELLOW}Update cancelled.${COLOR_RESET}"
+            echo ""
+            exit 0
+        fi
+    else
+        echo -e "  Installed : ${COLOR_GREEN}${CURRENT_DISPLAY}${COLOR_RESET}"
+        echo -e "  Available : ${COLOR_CYAN}${NEW_DISPLAY}${COLOR_RESET}"
+        echo ""
+        read -r -p "  Update from ${CURRENT_DISPLAY} → ${NEW_DISPLAY}? [Y/n]: " _confirm
+        _confirm="${_confirm:-y}"
+        if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
+            echo ""
+            echo -e "  ${COLOR_YELLOW}Update cancelled.${COLOR_RESET}"
+            echo ""
+            exit 0
+        fi
+    fi
+    echo ""
+fi
+
+# ─── Download (remote installs only) ─────────────────────────────────────────
+
+if [[ "$REMOTE_INSTALL" == "true" ]]; then
     if [[ -n "$RESOLVED_TAG" ]]; then
         ARCHIVE_URL="https://github.com/${REPO}/archive/refs/tags/${RESOLVED_TAG}.tar.gz"
         EXTRACT_SUBDIR="local-dev-proxy-${RESOLVED_TAG#v}"
-        echo "Installing version ${RESOLVED_TAG}..."
+        echo "Downloading version ${RESOLVED_TAG}..."
     else
         ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
         EXTRACT_SUBDIR="local-dev-proxy-${BRANCH}"
-        echo "Installing from branch ${BRANCH}..."
+        echo "Downloading from branch ${BRANCH}..."
     fi
 
-    echo "Downloading from GitHub..."
     if command -v curl &>/dev/null; then
         curl -fsSL "$ARCHIVE_URL" -o "${TMP_DIR}/archive.tar.gz"
     else
@@ -117,29 +187,41 @@ if [[ "$REMOTE_INSTALL" == "true" ]]; then
     BASE_DIR="${TMP_DIR}/${EXTRACT_SUBDIR}"
 fi
 
-# Create installation directory
-echo "Creating installation directory..."
+# ─── Install / Update files ───────────────────────────────────────────────────
+
+if [[ "$IS_UPDATE" == "true" ]]; then
+    echo "Updating files..."
+else
+    echo "Creating installation directory..."
+fi
+
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$BIN_DIR"
 
-# Copy files
 echo "Copying files..."
-cp -r "${BASE_DIR}/bin" "$INSTALL_DIR/"
-cp -r "${BASE_DIR}/lib" "$INSTALL_DIR/"
-cp -r "${BASE_DIR}/config" "$INSTALL_DIR/"
+cp -r "${BASE_DIR}/bin"     "$INSTALL_DIR/"
+cp -r "${BASE_DIR}/lib"     "$INSTALL_DIR/"
+cp -r "${BASE_DIR}/config"  "$INSTALL_DIR/"
 cp -r "${BASE_DIR}/scripts" "$INSTALL_DIR/"
 
-# Set permissions
+# Write version file
+if [[ -n "$RESOLVED_TAG" ]]; then
+    echo "${RESOLVED_TAG#v}" > "$VERSION_FILE"
+elif [[ -f "${BASE_DIR}/VERSION" ]]; then
+    cp "${BASE_DIR}/VERSION" "$VERSION_FILE"
+else
+    echo "dev-${BRANCH}" > "$VERSION_FILE"
+fi
+
 echo "Setting permissions..."
 chmod +x "$INSTALL_DIR/bin/devproxy"
 chmod +x "$INSTALL_DIR/lib"/*.sh
 chmod +x "$INSTALL_DIR/scripts"/*.sh
 
-# Create symlink
 echo "Creating symbolic link..."
 ln -sf "$INSTALL_DIR/bin/devproxy" "$BIN_LINK"
 
-# Create required directories
+# Ensure data directories exist (never overwrite user data)
 mkdir -p "$INSTALL_DIR/certificates"
 mkdir -p "$INSTALL_DIR/sites-enabled"
 mkdir -p "$INSTALL_DIR/config/templates"
@@ -159,17 +241,37 @@ if [[ "$PLATFORM" == "windows" ]] || [[ "$USE_SUDO" == "false" ]]; then
     fi
 fi
 
+# ─── Success message ──────────────────────────────────────────────────────────
+
+FINAL_VERSION="$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]')"
+
 echo ""
-echo -e "${COLOR_GREEN}════════════════════════════════════════════════════════════════"
-echo "           Installation completed successfully!"
-echo -e "════════════════════════════════════════════════════════════════${COLOR_RESET}"
+if [[ "$IS_UPDATE" == "true" ]]; then
+    echo -e "${COLOR_CYAN}════════════════════════════════════════════════════════════════"
+    echo "              Update completed successfully!"
+    echo -e "════════════════════════════════════════════════════════════════${COLOR_RESET}"
+    echo ""
+    echo -e "  ${COLOR_GREEN}${INSTALLED_VERSION}${COLOR_RESET}  →  ${COLOR_CYAN}${FINAL_VERSION}${COLOR_RESET}"
+else
+    echo -e "${COLOR_GREEN}════════════════════════════════════════════════════════════════"
+    echo "            Installation completed successfully!"
+    echo -e "════════════════════════════════════════════════════════════════${COLOR_RESET}"
+    echo ""
+    echo -e "  Version   : ${COLOR_GREEN}${FINAL_VERSION}${COLOR_RESET}"
+fi
+
 echo ""
-echo -e "You can now use: ${COLOR_BLUE}devproxy${COLOR_RESET}"
+echo -e "  Run ${COLOR_BLUE}devproxy${COLOR_RESET} to get started."
 echo ""
-echo "Quick start:"
-echo "  devproxy help                          Show help"
-echo "  devproxy config                        Show configuration"
-echo "  devproxy create -h app.local -p 3000  Create domain"
+echo -e "${COLOR_BLUE}  ┌──────────────────────────────────────────────────────────────┐${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  │${COLOR_RESET}                      Quick Start Commands                     ${COLOR_BLUE}│${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  ├──────────────────────────────────────┬───────────────────────┤${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  │${COLOR_RESET}  ${COLOR_GREEN}devproxy help${COLOR_RESET}                      ${COLOR_BLUE}│${COLOR_RESET}  Show all commands       ${COLOR_BLUE}│${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  │${COLOR_RESET}  ${COLOR_GREEN}devproxy config${COLOR_RESET}                    ${COLOR_BLUE}│${COLOR_RESET}  Show configuration      ${COLOR_BLUE}│${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  │${COLOR_RESET}  ${COLOR_GREEN}devproxy mode${COLOR_RESET}                      ${COLOR_BLUE}│${COLOR_RESET}  Show proxy mode         ${COLOR_BLUE}│${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  │${COLOR_RESET}  ${COLOR_GREEN}devproxy create -h app.local -p 3000${COLOR_RESET} ${COLOR_BLUE}│${COLOR_RESET}  Create domain           ${COLOR_BLUE}│${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  │${COLOR_RESET}  ${COLOR_GREEN}devproxy remove -h app.local${COLOR_RESET}        ${COLOR_BLUE}│${COLOR_RESET}  Remove domain           ${COLOR_BLUE}│${COLOR_RESET}"
+echo -e "${COLOR_BLUE}  └──────────────────────────────────────┴───────────────────────┘${COLOR_RESET}"
 echo ""
-echo -e "Configuration file: ${COLOR_BLUE}~/.local-dev-proxy.conf${COLOR_RESET}"
+echo -e "  Config file: ${COLOR_YELLOW}~/.local-dev-proxy.conf${COLOR_RESET}"
 echo ""

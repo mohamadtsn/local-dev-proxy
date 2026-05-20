@@ -4,9 +4,11 @@
 
 set -e
 
-# Determine script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Determine script directory (resolve symlinks so lib/ is found correctly)
+_REAL_SCRIPT="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$_REAL_SCRIPT")" && pwd)"
 BASE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+unset _REAL_SCRIPT
 
 # Load configuration
 if [[ -f "${BASE_DIR}/config/default.conf" ]]; then
