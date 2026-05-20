@@ -127,7 +127,7 @@ docker_copy_from_container() {
 docker_exec() {
   local container="${1:-$DOCKER_CONTAINER_NAME}"
   shift
-  local cmd="$@"
+  local cmd="$*"
 
   if ! is_docker_container_running "$container"; then
     error "Container '$container' is not running"

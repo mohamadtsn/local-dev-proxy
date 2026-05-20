@@ -9,7 +9,6 @@ BIN_LINK="/usr/local/bin/devproxy"
 COLOR_GREEN='\033[1;32m'
 COLOR_BLUE='\033[1;34m'
 COLOR_YELLOW='\033[1;33m'
-COLOR_RED='\033[1;31m'
 COLOR_RESET='\033[0m'
 
 echo -e "${COLOR_BLUE}════════════════════════════════════════════════════════════════"
@@ -39,9 +38,9 @@ if [[ -d "$INSTALL_DIR" ]]; then
     echo -e "${COLOR_GREEN}✓${COLOR_RESET} Removed all files and data"
   else
     # Keep certificates and configs
-    rm -rf "$INSTALL_DIR/bin"
-    rm -rf "$INSTALL_DIR/lib"
-    rm -rf "$INSTALL_DIR/scripts"
+    rm -rf "${INSTALL_DIR:?}/bin"
+    rm -rf "${INSTALL_DIR:?}/lib"
+    rm -rf "${INSTALL_DIR:?}/scripts"
     echo -e "${COLOR_GREEN}✓${COLOR_RESET} Removed program files"
     echo -e "${COLOR_YELLOW}ℹ${COLOR_RESET} Kept certificates and configurations in: $INSTALL_DIR"
   fi

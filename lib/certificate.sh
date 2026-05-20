@@ -274,7 +274,6 @@ verify_certificate() {
 
   # Get certificate info
   local subject=$(openssl x509 -in "$crt_file" -noout -subject | sed 's/subject=//')
-  local issuer=$(openssl x509 -in "$crt_file" -noout -issuer | sed 's/issuer=//')
   local start=$(openssl x509 -in "$crt_file" -noout -startdate | sed 's/notBefore=//')
   local end=$(openssl x509 -in "$crt_file" -noout -enddate | sed 's/notAfter=//')
 

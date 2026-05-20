@@ -1,0 +1,10 @@
+# Disable cosmetic/style warnings that don't affect correctness
+disable=SC2155  # Declare and assign separately (style preference)
+disable=SC2181  # Check exit code directly instead of $? (style)
+disable=SC2086  # Double quote to prevent globbing (intentional in some cases)
+disable=SC2005  # Useless echo $(cmd) (style)
+disable=SC2162  # read without -r (intentional for interactive prompts)
+disable=SC2030  # Modification of var is local to subshell (known limitation)
+disable=SC2031  # Var modified in subshell (known limitation)
+disable=SC1090  # Can't follow non-constant source (dynamic paths)
+disable=SC1091  # Not following sourced file (runtime-only files)
