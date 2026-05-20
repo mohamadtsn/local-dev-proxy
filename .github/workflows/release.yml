@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release archive
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          ARCHIVE_NAME="local-dev-proxy-${VERSION}.tar.gz"
+
+          tar -czf "$ARCHIVE_NAME" \
+            --transform "s|^\.|local-dev-proxy-${VERSION#v}|" \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.idea' \
+            --exclude='tests/bats' \
+            --exclude='tests/bats-support' \
+            --exclude='tests/bats-assert' \
+            --exclude='tests/bats-file' \
+            --exclude='tests/reports' \
+            --exclude='tests/coverage' \
+            --exclude='tests/fixtures' \
+            --exclude='certificates' \
+            --exclude='sites-enabled' \
+            --exclude='*.log' \
+            .
+
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Local Dev Proxy ${{ steps.version.outputs.VERSION }}"
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+          generate_release_notes: true
+          files: ${{ env.ARCHIVE_NAME }}

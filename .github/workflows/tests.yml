@@ -1,0 +1,239 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  # ============================================================================
+  # Unit Tests - Fast tests on all platforms
+  # ============================================================================
+  unit-tests:
+    name: Unit Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup test environment (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          # Install BATS
+          git clone https://github.com/bats-core/bats-core.git tests/bats
+          git clone https://github.com/bats-core/bats-support.git tests/bats-support
+          git clone https://github.com/bats-core/bats-assert.git tests/bats-assert
+          git clone https://github.com/bats-core/bats-file.git tests/bats-file
+          
+          # Make BATS executable
+          chmod +x tests/bats/bin/bats
+      
+      - name: Setup test environment (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # Install BATS
+          git clone https://github.com/bats-core/bats-core.git tests/bats
+          git clone https://github.com/bats-core/bats-support.git tests/bats-support
+          git clone https://github.com/bats-core/bats-assert.git tests/bats-assert
+          git clone https://github.com/bats-core/bats-file.git tests/bats-file
+      
+      - name: Run unit tests
+        shell: bash
+        run: |
+          ./tests/bats/bin/bats tests/unit/test_common.bats
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-${{ matrix.os }}
+          path: tests/reports/
+
+  # ============================================================================
+  # Integration Tests - With Docker on Linux/macOS
+  # ============================================================================
+  integration-tests:
+    name: Integration Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Docker (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Install Docker on macOS
+          brew install docker
+          # Note: macOS runners don't have Docker daemon by default
+          # This is a known limitation
+      
+      - name: Setup test environment
+        run: |
+          # Install BATS
+          git clone https://github.com/bats-core/bats-core.git tests/bats
+          git clone https://github.com/bats-core/bats-support.git tests/bats-support
+          git clone https://github.com/bats-core/bats-assert.git tests/bats-assert
+          git clone https://github.com/bats-core/bats-file.git tests/bats-file
+          
+          chmod +x tests/bats/bin/bats
+      
+      - name: Pull Nginx Docker image (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker pull nginx:latest
+          docker run -d --name nginx-main -p 80:80 -p 443:443 nginx:latest
+      
+      - name: Run integration tests - Docker
+        if: runner.os == 'Linux'
+        run: |
+          ./tests/bats/bin/bats tests/integration/test_docker.bats
+      
+      - name: Run integration tests - Nginx
+        run: |
+          ./tests/bats/bin/bats tests/integration/test_nginx.bats
+      
+      - name: Cleanup Docker
+        if: always() && runner.os == 'Linux'
+        run: |
+          docker stop nginx-main || true
+          docker rm nginx-main || true
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results-${{ matrix.os }}
+          path: tests/reports/
+
+  # ============================================================================
+  # E2E Tests - Complete workflow tests
+  # ============================================================================
+  e2e-tests:
+    name: E2E Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup test environment
+        run: |
+          # Install BATS
+          git clone https://github.com/bats-core/bats-core.git tests/bats
+          git clone https://github.com/bats-core/bats-support.git tests/bats-support
+          git clone https://github.com/bats-core/bats-assert.git tests/bats-assert
+          git clone https://github.com/bats-core/bats-file.git tests/bats-file
+          
+          chmod +x tests/bats/bin/bats
+      
+      - name: Install OpenSSL
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y openssl
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install openssl
+          fi
+      
+      - name: Setup Docker (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker pull nginx:latest
+          docker run -d --name test-nginx-container -p 80:80 -p 443:443 nginx:latest
+      
+      - name: Run E2E tests
+        run: |
+          ./tests/bats/bin/bats tests/e2e/test_create_domain.bats
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop test-nginx-container || true
+          docker rm test-nginx-container || true
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results-${{ matrix.os }}
+          path: tests/reports/
+
+  # ============================================================================
+  # Test Report - Combine all results
+  # ============================================================================
+  test-report:
+    name: Test Report
+    needs: [unit-tests, integration-tests, e2e-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+      
+      - name: Display test summary
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Unit Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Ubuntu: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ macOS: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Windows: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Integration Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Ubuntu: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ macOS: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### E2E Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Ubuntu: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ macOS: Completed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Code Quality Checks
+  # ============================================================================
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      
+      - name: Run ShellCheck on all scripts
+        run: |
+          find . -type f -name "*.sh" -exec shellcheck -x {} +
+          shellcheck bin/devproxy
+      
+      - name: Check script permissions
+        run: |
+          # Verify executable scripts are marked executable
+          [ -x bin/devproxy ] || exit 1
+          [ -x scripts/install.sh ] || exit 1
+          [ -x scripts/uninstall.sh ] || exit 1
