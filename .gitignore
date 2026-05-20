@@ -1,0 +1,35 @@
+# Runtime output
+certificates/
+sites-enabled/
+*.log
+local-dev-proxy.log
+
+# Backups and temp files
+*.bak
+*.bak.*
+*.tmp
+*~
+
+# Test dependencies (installed via make setup)
+tests/bats/
+tests/bats-support/
+tests/bats-assert/
+tests/bats-file/
+
+# Test output
+tests/reports/
+tests/coverage/
+tests/fixtures/
+
+# User configuration
+.local-dev-proxy.conf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
