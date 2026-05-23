@@ -164,6 +164,20 @@ test-docker: ## Run tests with Docker environment
 		exit 1; \
 	fi
 
+##@ Release
+
+release: ## Bump patch version, commit, tag, and push (triggers GitHub Actions release)
+	@./scripts/release.sh patch
+
+release-minor: ## Bump minor version and release
+	@./scripts/release.sh minor
+
+release-major: ## Bump major version and release
+	@./scripts/release.sh major
+
+release-dry: ## Preview what the next patch release would do (no changes)
+	@./scripts/release.sh patch --dry-run
+
 ##@ CI/CD
 
 ci: setup lint test ## Run CI pipeline locally

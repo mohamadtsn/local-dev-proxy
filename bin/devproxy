@@ -27,6 +27,10 @@ for lib in "${LIB_DIR}"/*.sh; do
     fi
 done
 
+# Resolve a writable log file before any logging occurs.
+# When installed as root, the default log path is owned by root.
+_resolve_log_file
+
 # Ensure required directories exist
 ensure_directory "$CERT_DIR"
 ensure_directory "$SITE_ENABLED_DIR"
@@ -35,78 +39,82 @@ ensure_directory "$(dirname "$LOG_FILE")"
 
 # Display usage information
 usage() {
-    cat << EOF
-Usage: devproxy [COMMAND] [OPTIONS]
+    local version
+    version=$(cat "${BASE_DIR}/VERSION" 2>/dev/null || echo "dev")
 
-Local Development Proxy - Manage domains, SSL certificates and Nginx configurations
+    echo ""
+    echo -e "  ${COLOR_CYAN}╭──────────────────────────────────────────────────────╮${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_WHITE}devproxy${COLOR_RESET}  ${COLOR_DIM}·${COLOR_RESET}  Local Dev Proxy  ${COLOR_DIM}·${COLOR_RESET}  ${COLOR_YELLOW}v${version}${COLOR_RESET}           ${COLOR_CYAN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}╰──────────────────────────────────────────────────────╯${COLOR_RESET}"
+    echo ""
+    echo -e "  ${COLOR_DIM}Usage:${COLOR_RESET}  devproxy ${COLOR_CYAN}<command>${COLOR_RESET} [options]"
+    echo ""
 
-COMMANDS:
-    create              Create a new domain with configuration
-    remove              Remove a domain and its configuration
+    echo -e "  ${COLOR_BOLD}DOMAIN MANAGEMENT${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}create${COLOR_RESET}              Create a new domain with configuration"
+    echo -e "    ${COLOR_CYAN}remove${COLOR_RESET}              Remove a domain and its configuration"
+    echo ""
 
-    cert                Certificate management commands
-        generate        Generate SSL certificate
-        remove          Remove SSL certificate
-        list            List all certificates
+    echo -e "  ${COLOR_BOLD}CERTIFICATES${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}cert generate${COLOR_RESET}       Generate SSL certificate for a domain"
+    echo -e "    ${COLOR_CYAN}cert remove${COLOR_RESET}         Remove SSL certificate"
+    echo -e "    ${COLOR_CYAN}cert list${COLOR_RESET}           List all certificates"
+    echo ""
 
-    hosts               Hosts file management commands
-        add             Add entry to hosts file
-        remove          Remove entry from hosts file
-        list            List hosts file entries
+    echo -e "  ${COLOR_BOLD}HOSTS FILE${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}hosts add${COLOR_RESET}           Add entry to hosts file ${COLOR_YELLOW}(requires sudo)${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}hosts remove${COLOR_RESET}        Remove entry from hosts file ${COLOR_YELLOW}(requires sudo)${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}hosts list${COLOR_RESET}          List hosts file entries"
+    echo ""
 
-    nginx               Nginx management commands
-        create-site     Create site configuration
-        remove-site     Remove site configuration
-        list            List all site configurations
-        test            Test Nginx configuration
-        reload          Reload Nginx
+    echo -e "  ${COLOR_BOLD}NGINX${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}nginx create-site${COLOR_RESET}   Create site configuration"
+    echo -e "    ${COLOR_CYAN}nginx remove-site${COLOR_RESET}   Remove site configuration"
+    echo -e "    ${COLOR_CYAN}nginx list${COLOR_RESET}          List all site configurations"
+    echo -e "    ${COLOR_CYAN}nginx test${COLOR_RESET}          Test Nginx configuration"
+    echo -e "    ${COLOR_CYAN}nginx reload${COLOR_RESET}        Reload Nginx"
+    echo ""
 
-    mode                Show or change proxy mode (docker/local/auto)
-    config              Show current configuration
-    help                Show this help message
+    echo -e "  ${COLOR_BOLD}GENERAL${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}mode${COLOR_RESET}                Show or change proxy mode"
+    echo -e "    ${COLOR_CYAN}config${COLOR_RESET}              Show current configuration"
+    echo -e "    ${COLOR_CYAN}help${COLOR_RESET}                Show this help message"
+    echo ""
 
-OPTIONS:
-    -h, --host DOMAIN       Domain name
-    -p, --port PORT         Port number
-    -i, --ip IP             IP address (default: 127.0.0.1)
-    -s, --subdomain         Is subdomain (requires -m)
-    -m, --main-domain       Main domain (for subdomain)
-    --no-ssl                Create domain without SSL
-    --ssl                   Create domain with SSL (default)
-    --template PATH         Custom Nginx template path
-    --mode MODE             Proxy mode: docker, local, or auto
-    --help                  Show help message
+    echo -e "  ${COLOR_BOLD}OPTIONS${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}-h, --host${COLOR_RESET} DOMAIN       Domain name"
+    echo -e "    ${COLOR_CYAN}-p, --port${COLOR_RESET} PORT         Port number"
+    echo -e "    ${COLOR_CYAN}-i, --ip${COLOR_RESET} IP             IP address ${COLOR_DIM}(default: 127.0.0.1)${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}-s, --subdomain${COLOR_RESET}          Treat as subdomain ${COLOR_DIM}(requires -m)${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}-m, --main-domain${COLOR_RESET} DOMAIN Main domain for subdomain"
+    echo -e "        ${COLOR_CYAN}--no-ssl${COLOR_RESET}             Disable SSL"
+    echo -e "        ${COLOR_CYAN}--ssl${COLOR_RESET}                Enable SSL ${COLOR_DIM}(default)${COLOR_RESET}"
+    echo -e "        ${COLOR_CYAN}--template${COLOR_RESET} PATH       Custom Nginx template"
+    echo -e "        ${COLOR_CYAN}--mode${COLOR_RESET} MODE           Proxy mode: docker, local, auto"
+    echo ""
 
-EXAMPLES:
-    # Create domain with SSL (default)
-    devproxy create -h myapp.local -p 3000
-
-    # Create domain without SSL
-    devproxy create -h myapp.local -p 3000 --no-ssl
-
-    # Create subdomain (shares certificate with main domain)
-    devproxy create -h api.myapp.local -p 8080 -s -m myapp.local
-
-    # Create domain with custom template
-    devproxy create -h myapp.local -p 3000 --template /path/to/custom.stub
-
-    # Use specific proxy mode
-    devproxy create -h myapp.local -p 3000 --mode local
-
-    # Generate certificate only
-    devproxy cert generate -h myapp.local
-
-    # Add to hosts file
-    sudo devproxy hosts add -h myapp.local -i 127.0.0.1
-
-    # Check current mode
-    devproxy mode
-
-    # Show configuration
-    devproxy config
-
-For more information, visit: https://github.com/mohamadtsn/local-dev-proxy
-EOF
+    echo -e "  ${COLOR_BOLD}EXAMPLES${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_DIM}# Create domain with SSL${COLOR_RESET}"
+    echo -e "    devproxy create ${COLOR_CYAN}-h myapp.local -p 3000${COLOR_RESET}"
+    echo ""
+    echo -e "    ${COLOR_DIM}# Create subdomain (shares cert with main domain)${COLOR_RESET}"
+    echo -e "    devproxy create ${COLOR_CYAN}-h api.myapp.local -p 8080 -s -m myapp.local${COLOR_RESET}"
+    echo ""
+    echo -e "    ${COLOR_DIM}# Add to hosts file${COLOR_RESET}"
+    echo -e "    sudo devproxy hosts add ${COLOR_CYAN}-h myapp.local${COLOR_RESET}"
+    echo ""
+    echo -e "    ${COLOR_DIM}# Switch to Docker mode${COLOR_RESET}"
+    echo -e "    devproxy mode ${COLOR_CYAN}--mode docker${COLOR_RESET}"
+    echo ""
+    echo -e "  ${COLOR_DIM}https://github.com/mohamadtsn/local-dev-proxy${COLOR_RESET}"
+    echo ""
 }
 
 # Parse command line arguments
@@ -290,17 +298,22 @@ cmd_create_domain() {
     if check_root; then
         add_host "$IP" "$HOST"
     else
-        warning "Skipping hosts file update (requires root)"
-        info "Run manually: sudo devproxy hosts add -h $HOST -i $IP"
+        warning "Skipping hosts file update — run: sudo devproxy hosts add -h $HOST -i $IP"
     fi
 
-    success "Domain created successfully: $HOST"
+    local scheme="http"
+    [[ "$SSL_ENABLED" == "true" ]] && scheme="https"
 
-    if [[ "$SSL_ENABLED" == "true" ]]; then
-        info "Access your site at: https://$HOST"
-    else
-        info "Access your site at: http://$HOST"
-    fi
+    echo ""
+    echo -e "  ${COLOR_GREEN}╭─ Domain Ready ──────────────────────────────────────────╮${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_WHITE}${HOST}${COLOR_RESET} is set up successfully"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_DIM}URL:${COLOR_RESET}  ${COLOR_CYAN}${scheme}://${HOST}${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_DIM}Port:${COLOR_RESET} ${PORT}  ${COLOR_DIM}|  Mode:${COLOR_RESET} $(determine_proxy_mode 2>/dev/null || echo 'N/A')  ${COLOR_DIM}|  SSL:${COLOR_RESET} ${SSL_ENABLED}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}╰─────────────────────────────────────────────────────────╯${COLOR_RESET}"
+    echo ""
 }
 
 # Command: Remove domain
@@ -446,114 +459,158 @@ cmd_nginx() {
 # Command: Mode management
 cmd_mode() {
     if [[ -n "$FORCE_MODE" ]]; then
-        # Set mode
         case "$FORCE_MODE" in
             docker|local|auto)
-                info "Setting proxy mode to: $FORCE_MODE"
-
-                # Update user config
                 local config_file="$HOME/.local-dev-proxy.conf"
                 if [[ -f "$config_file" ]]; then
                     sed -i.bak "s/^export PROXY_MODE=.*/export PROXY_MODE=\"$FORCE_MODE\"/" "$config_file"
                 else
                     echo "export PROXY_MODE=\"$FORCE_MODE\"" > "$config_file"
                 fi
-
-                success "Proxy mode set to: $FORCE_MODE"
-                info "This will take effect for new commands"
+                echo ""
+                echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Proxy mode set to ${COLOR_CYAN}${FORCE_MODE}${COLOR_RESET}"
+                echo -e "  ${COLOR_DIM}Takes effect for new commands.${COLOR_RESET}"
+                echo ""
                 ;;
             *)
-                error "Invalid mode: $FORCE_MODE"
-                echo "Valid modes: docker, local, auto"
+                echo ""
+                echo -e "  ${COLOR_RED}✗  Invalid mode: ${FORCE_MODE}${COLOR_RESET}"
+                echo -e "  ${COLOR_DIM}Valid modes: docker, local, auto${COLOR_RESET}"
+                echo ""
                 exit 1
                 ;;
         esac
-    else
-        # Show current mode
-        local current_mode=$(determine_proxy_mode)
-        info "Current proxy mode: $current_mode"
-        info "Configured mode: $PROXY_MODE"
-
-        echo ""
-        echo "Available modes:"
-        echo "  docker - Use Docker container for Nginx"
-        echo "  local  - Use system Nginx installation"
-        echo "  auto   - Auto-detect (prefer Docker if available)"
-        echo ""
-        echo "To change mode: devproxy mode --mode <docker|local|auto>"
+        return
     fi
+
+    # Show current status
+    local current_mode
+    current_mode=$(determine_proxy_mode 2>/dev/null || echo "unavailable")
+
+    local docker_status local_status
+    if is_docker_available 2>/dev/null && is_docker_container_running "$DOCKER_CONTAINER_NAME" 2>/dev/null; then
+        docker_status="${COLOR_GREEN}● running${COLOR_RESET}"
+    elif is_docker_available 2>/dev/null; then
+        docker_status="${COLOR_YELLOW}● available${COLOR_RESET} ${COLOR_DIM}(container not running)${COLOR_RESET}"
+    else
+        docker_status="${COLOR_DIM}○ not available${COLOR_RESET}"
+    fi
+
+    if command_exists "$NGINX_BIN" 2>/dev/null; then
+        local_status="${COLOR_GREEN}● installed${COLOR_RESET}"
+    else
+        local_status="${COLOR_DIM}○ not installed${COLOR_RESET}"
+    fi
+
+    echo ""
+    echo -e "  ${COLOR_CYAN}╭─ Proxy Mode ──────────────────────────────────────────╮${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}  Configured:      ${COLOR_BOLD}${PROXY_MODE}${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}  Active:          ${COLOR_BOLD}${current_mode}${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}╰───────────────────────────────────────────────────────╯${COLOR_RESET}"
+    echo ""
+    echo -e "  ${COLOR_BOLD}Available Modes${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}docker${COLOR_RESET}    Use Docker container for Nginx      ${docker_status}"
+    echo -e "  ${COLOR_CYAN}local${COLOR_RESET}     Use system Nginx installation        ${local_status}"
+    echo -e "  ${COLOR_CYAN}auto${COLOR_RESET}      Auto-detect ${COLOR_DIM}(prefer Docker if available)${COLOR_RESET}"
+    echo ""
+    echo -e "  ${COLOR_DIM}To change:  devproxy mode --mode <docker|local|auto>${COLOR_RESET}"
+    echo ""
 }
 
 # Command: Show configuration
 cmd_show_config() {
-    local current_mode=$(determine_proxy_mode 2>/dev/null || echo "N/A")
+    local current_mode
+    current_mode=$(determine_proxy_mode 2>/dev/null || echo "N/A")
 
-    cat << EOF
-${COLOR_CYAN}â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-                    Local Dev Proxy Configuration
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•${COLOR_RESET}
+    local version
+    version=$(cat "${BASE_DIR}/VERSION" 2>/dev/null || echo "dev")
 
-${COLOR_BLUE}General Settings:${COLOR_RESET}
-  Base Directory:     $BASE_DIR
-  Proxy Mode:         $PROXY_MODE (current: $current_mode)
-  Auto Reload:        $AUTO_RELOAD
-  Backup Configs:     $BACKUP_CONFIGS
+    local docker_running
+    is_docker_container_running "$DOCKER_CONTAINER_NAME" 2>/dev/null \
+        && docker_running="${COLOR_GREEN}Running${COLOR_RESET}" \
+        || docker_running="${COLOR_RED}Not Running${COLOR_RESET}"
 
-${COLOR_BLUE}Directories:${COLOR_RESET}
-  Certificates:       $CERT_DIR
-  Sites Enabled:      $SITE_ENABLED_DIR
-  Templates:          $TEMPLATE_DIR
-  Config:             $CONFIG_DIR
-  Libraries:          $LIB_DIR
+    local nginx_installed
+    command_exists "$NGINX_BIN" \
+        && nginx_installed="${COLOR_GREEN}Installed${COLOR_RESET}" \
+        || nginx_installed="${COLOR_RED}Not Installed${COLOR_RESET}"
 
-${COLOR_BLUE}Docker Settings:${COLOR_RESET}
-  Container Name:     $DOCKER_CONTAINER_NAME
-  Host Access:        $DOCKER_HOST_ACCESS
-  Custom Host IP:     $DOCKER_CUSTOM_HOST_IP
-  SSL Path:           $DOCKER_SSL_PATH
-  Config Path:        $DOCKER_CONF_PATH
-  Status:             $(is_docker_container_running "$DOCKER_CONTAINER_NAME" 2>/dev/null && echo "${COLOR_GREEN}Running${COLOR_RESET}" || echo "${COLOR_RED}Not Running${COLOR_RESET}")
+    local user_conf_exists
+    [[ -f "$HOME/.local-dev-proxy.conf" ]] \
+        && user_conf_exists="${COLOR_GREEN}Yes${COLOR_RESET}" \
+        || user_conf_exists="${COLOR_YELLOW}No${COLOR_RESET}"
 
-${COLOR_BLUE}Local Nginx Settings:${COLOR_RESET}
-  Config Directory:   $NGINX_CONF_DIR
-  Enabled Directory:  $NGINX_ENABLED_DIR
-  SSL Directory:      $NGINX_SSL_DIR
-  Binary:             $NGINX_BIN
-  Use Systemd:        $USE_SYSTEMD
-  Status:             $(command_exists "$NGINX_BIN" && echo "${COLOR_GREEN}Installed${COLOR_RESET}" || echo "${COLOR_RED}Not Installed${COLOR_RESET}")
+    echo ""
+    echo -e "  ${COLOR_CYAN}╭──────────────────────────────────────────────────────╮${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_WHITE}Local Dev Proxy${COLOR_RESET}  ${COLOR_DIM}·${COLOR_RESET}  Configuration  ${COLOR_DIM}·${COLOR_RESET}  ${COLOR_YELLOW}v${version}${COLOR_RESET}      ${COLOR_CYAN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}╰──────────────────────────────────────────────────────╯${COLOR_RESET}"
+    echo ""
 
-${COLOR_BLUE}SSL Certificate:${COLOR_RESET}
-  Country:            $SSL_COUNTRY
-  State:              $SSL_STATE
-  City:               $SSL_CITY
-  Organization:       $SSL_ORGANIZATION
-  Organization Unit:  $SSL_ORGANIZATION_UNIT
-  Email:              $SSL_EMAIL
-  Validity Days:      $SSL_VALIDITY_DAYS
-  Key Size:           $SSL_KEY_SIZE
+    echo -e "  ${COLOR_BOLD}General${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  Base Directory    $BASE_DIR"
+    echo -e "  Proxy Mode        ${COLOR_CYAN}${PROXY_MODE}${COLOR_RESET}  ${COLOR_DIM}(active: ${current_mode})${COLOR_RESET}"
+    echo -e "  Auto Reload       $AUTO_RELOAD"
+    echo -e "  Backup Configs    $BACKUP_CONFIGS"
+    echo ""
 
-${COLOR_BLUE}Template Configuration:${COLOR_RESET}
-  Default Template:   $DEFAULT_TEMPLATE
-  Custom Template:    ${CUSTOM_TEMPLATE_PATH:-Not set}
+    echo -e "  ${COLOR_BOLD}Directories${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  Certificates      $CERT_DIR"
+    echo -e "  Sites Enabled     $SITE_ENABLED_DIR"
+    echo -e "  Templates         $TEMPLATE_DIR"
+    echo -e "  Libraries         $LIB_DIR"
+    echo ""
 
-${COLOR_BLUE}Defaults:${COLOR_RESET}
-  IP Address:         $DEFAULT_IP
-  SSL Enabled:        $DEFAULT_SSL_ENABLED
+    echo -e "  ${COLOR_BOLD}Docker${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  Container Name    $DOCKER_CONTAINER_NAME"
+    echo -e "  Host Access       $DOCKER_HOST_ACCESS"
+    echo -e "  SSL Path          $DOCKER_SSL_PATH"
+    echo -e "  Config Path       $DOCKER_CONF_PATH"
+    echo -e "  Status            $(echo -e "$docker_running")"
+    echo ""
 
-${COLOR_BLUE}System:${COLOR_RESET}
-  Operating System:   $(detect_os)
-  Hosts File:         $HOSTS_FILE
-  Log File:           $LOG_FILE
+    echo -e "  ${COLOR_BOLD}Local Nginx${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  Config Dir        $NGINX_CONF_DIR"
+    echo -e "  Enabled Dir       $NGINX_ENABLED_DIR"
+    echo -e "  SSL Dir           $NGINX_SSL_DIR"
+    echo -e "  Binary            $NGINX_BIN"
+    echo -e "  Use Systemd       $USE_SYSTEMD"
+    echo -e "  Status            $(echo -e "$nginx_installed")"
+    echo ""
 
-${COLOR_BLUE}User Configuration:${COLOR_RESET}
-  Location:           ~/.local-dev-proxy.conf
-  Exists:             $([[ -f "$HOME/.local-dev-proxy.conf" ]] && echo "${COLOR_GREEN}Yes${COLOR_RESET}" || echo "${COLOR_YELLOW}No${COLOR_RESET}")
+    echo -e "  ${COLOR_BOLD}SSL Certificate${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  Country           $SSL_COUNTRY"
+    echo -e "  State             $SSL_STATE"
+    echo -e "  City              $SSL_CITY"
+    echo -e "  Organization      $SSL_ORGANIZATION"
+    echo -e "  Email             $SSL_EMAIL"
+    echo -e "  Validity Days     $SSL_VALIDITY_DAYS"
+    echo -e "  Key Size          $SSL_KEY_SIZE bits"
+    echo ""
 
-${COLOR_CYAN}â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•${COLOR_RESET}
+    echo -e "  ${COLOR_BOLD}System${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  OS                $(detect_os)"
+    echo -e "  Hosts File        $HOSTS_FILE"
+    echo -e "  Log File          $LOG_FILE"
+    echo -e "  Default IP        $DEFAULT_IP"
+    echo -e "  SSL Default       $DEFAULT_SSL_ENABLED"
+    echo ""
 
-To override settings, edit: ${COLOR_CYAN}~/.local-dev-proxy.conf${COLOR_RESET}
-
-EOF
+    echo -e "  ${COLOR_BOLD}User Config${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "  Location          ~/.local-dev-proxy.conf"
+    echo -e "  Exists            $(echo -e "$user_conf_exists")"
+    echo ""
+    echo -e "  ${COLOR_DIM}To override settings, edit: ${COLOR_CYAN}~/.local-dev-proxy.conf${COLOR_RESET}"
+    echo ""
 }
 
 # Main execution

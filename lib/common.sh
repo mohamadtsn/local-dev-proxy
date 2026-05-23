@@ -3,13 +3,21 @@
 
 # Common utilities for local-dev-proxy
 
-# Check if running with root privileges
+# Check if running with root privileges (returns 0/1, non-fatal)
 check_root() {
+    [[ $EUID -eq 0 ]]
+}
+
+# Exit with a styled error when root is required
+require_root() {
     if [[ $EUID -ne 0 ]]; then
-        error "This operation requires root privileges. Please run with sudo."
-        return 1
+        echo ""
+        echo -e "${COLOR_RED}  ✗  This command requires root privileges${COLOR_RESET}"
+        echo ""
+        echo -e "  Try:  ${COLOR_CYAN}sudo devproxy $*${COLOR_RESET}"
+        echo ""
+        exit 1
     fi
-    return 0
 }
 
 # Detect operating system
@@ -20,6 +28,17 @@ detect_os() {
         CYGWIN*|MINGW*|MSYS*) echo "windows";;
         *)          echo "unknown";;
     esac
+}
+
+# Resolve a writable log file path — called once at startup before any log() call.
+# If LOG_FILE is not writable (e.g., installed as root), falls back to user-space.
+_resolve_log_file() {
+    if true >> "$LOG_FILE" 2>/dev/null; then
+        return 0
+    fi
+    local fallback_dir="${XDG_STATE_HOME:-$HOME/.local/state}/local-dev-proxy"
+    mkdir -p "$fallback_dir" 2>/dev/null || true
+    export LOG_FILE="${fallback_dir}/devproxy.log"
 }
 
 # Logging functions with rotation
@@ -37,19 +56,18 @@ log() {
     local level="$1"
     shift
     local message="$*"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    # Rotate log if needed
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
     rotate_log_if_needed
-    
-    echo "[${timestamp}] [${level}] ${message}" >> "${LOG_FILE}"
-    
+    echo "[${timestamp}] [${level}] ${message}" >> "${LOG_FILE}" 2>/dev/null || true
+
     case "${level}" in
-        ERROR)   echo -e "${COLOR_RED}✗ ${message}${COLOR_RESET}" >&2;;
-        SUCCESS) echo -e "${COLOR_GREEN}✓ ${message}${COLOR_RESET}";;
-        WARNING) echo -e "${COLOR_YELLOW}⚠ ${message}${COLOR_RESET}";;
-        INFO)    echo -e "${COLOR_BLUE}ℹ ${message}${COLOR_RESET}";;
-        *)       echo "${message}";;
+        ERROR)   echo -e "${COLOR_RED}  ✗  ${message}${COLOR_RESET}" >&2;;
+        SUCCESS) echo -e "${COLOR_GREEN}  ✓  ${message}${COLOR_RESET}";;
+        WARNING) echo -e "${COLOR_YELLOW}  ⚠  ${message}${COLOR_RESET}";;
+        INFO)    echo -e "${COLOR_BLUE}  ›  ${message}${COLOR_RESET}";;
+        *)       echo "     ${message}";;
     esac
 }
 
@@ -172,14 +190,51 @@ is_writable() {
     fi
 }
 
-# Display progress indicator
+# Display progress indicator (simple, non-animated)
 show_progress() {
     local message="$1"
-    echo -ne "${COLOR_BLUE}${message}...${COLOR_RESET}"
+    echo -ne "${COLOR_BLUE}  ›  ${message}...${COLOR_RESET}"
 }
 
 hide_progress() {
     echo -e "\r\033[K"
+}
+
+# Animated spinner for long-running operations.
+# Usage:  start_spinner "Generating certificate"
+#         <long command>
+#         stop_spinner $?
+_SPINNER_PID=""
+
+start_spinner() {
+    local msg="${1:-Working}"
+    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    tput civis 2>/dev/null
+    (
+        local i=0
+        while true; do
+            printf "\r  ${COLOR_CYAN}%s${COLOR_RESET}  %s  " "${frames[$((i % 10))]}" "$msg"
+            sleep 0.08
+            i=$(( i + 1 ))
+        done
+    ) &
+    _SPINNER_PID=$!
+}
+
+stop_spinner() {
+    local status="${1:-0}"
+    if [[ -n "$_SPINNER_PID" ]]; then
+        kill "$_SPINNER_PID" 2>/dev/null
+        wait "$_SPINNER_PID" 2>/dev/null
+        _SPINNER_PID=""
+        printf "\r\033[K"
+    fi
+    tput cnorm 2>/dev/null
+    if [[ "$status" -eq 0 ]]; then
+        echo -e "${COLOR_GREEN}  ✓  Done${COLOR_RESET}"
+    else
+        echo -e "${COLOR_RED}  ✗  Failed${COLOR_RESET}"
+    fi
 }
 
 # Format file size

@@ -78,10 +78,10 @@ determine_proxy_mode() {
     ;;
   auto)
     if is_docker_available && is_docker_container_running "$DOCKER_CONTAINER_NAME"; then
-      info "Auto-detected: Using Docker mode"
+      info "Auto-detected: Using Docker mode" >&2
       echo "docker"
     elif command_exists "$NGINX_BIN"; then
-      info "Auto-detected: Using local Nginx mode"
+      info "Auto-detected: Using local Nginx mode" >&2
       echo "local"
     else
       error "Neither Docker nor local Nginx is available"
