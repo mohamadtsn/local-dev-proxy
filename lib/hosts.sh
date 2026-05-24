@@ -19,15 +19,14 @@ host_exists() {
   ' "$HOSTS_FILE"
 }
 
-# Write content from a temp file back to HOSTS_FILE.
-# Uses direct write if root, sudo tee otherwise.
+# Low-level write: overwrite HOSTS_FILE from a temp file.
+# Requires root or sudo to be available.
 _hosts_write() {
   local tmp="$1"
   if check_root; then
     cat "$tmp" > "$HOSTS_FILE"
   elif command_exists sudo; then
-    # shellcheck disable=SC2024  # tee writes as root via sudo; < is fine for stdin
-    sudo tee "$HOSTS_FILE" > /dev/null < "$tmp"
+    sudo cp "$tmp" "$HOSTS_FILE"
   else
     rm -f "$tmp"
     error "Cannot write to hosts file — run with sudo or as root"
@@ -45,25 +44,18 @@ add_host() {
     return 1
   fi
 
-  local tmp
-  tmp=$(mktemp) || { error "Failed to create temp file"; return 1; }
+  # Remove any existing entry first (silently — may not exist)
+  remove_host "$hostname" 2>/dev/null || true
 
-  # Build new content: strip any existing entry for this hostname, then append
-  awk -v h="$hostname" '
-    /^[[:space:]]*#/ { print; next }
-    {
-      skip=0
-      for (i=2; i<=NF; i++) if ($i == h) { skip=1; break }
-      if (!skip) print
-    }
-  ' "$HOSTS_FILE" > "$tmp"
-  echo "$ip_address $hostname" >> "$tmp"
-
-  if ! _hosts_write "$tmp"; then
-    rm -f "$tmp"
+  # Append the new entry
+  if check_root; then
+    printf '%s %s\n' "$ip_address" "$hostname" >> "$HOSTS_FILE"
+  elif command_exists sudo; then
+    printf '%s %s\n' "$ip_address" "$hostname" | sudo tee -a "$HOSTS_FILE" > /dev/null
+  else
+    error "Cannot write to hosts file — run with sudo or as root"
     return 1
   fi
-  rm -f "$tmp"
 
   success "Added to hosts: $ip_address $hostname"
   flush_dns_cache
@@ -96,7 +88,6 @@ remove_host() {
     }
   ' "$HOSTS_FILE" > "$tmp"
 
-  # Backup before writing
   if check_root; then
     cp "$HOSTS_FILE" "${HOSTS_FILE}.bak" 2>/dev/null || true
   elif command_exists sudo; then

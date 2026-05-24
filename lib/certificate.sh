@@ -344,7 +344,10 @@ remove_certificate() {
 
     # Remove from browser database (Linux)
     if command_exists certutil; then
-      certutil -d "$BROWSER_CERT_DB" -D -n "$hostname" 2>/dev/null
+      local nssdb_dir="$(dirname ${BROWSER_CERT_DB#sql:})"
+      if [[ -d "$nssdb_dir" ]]; then
+        certutil -d "$BROWSER_CERT_DB" -D -n "$hostname" 2>/dev/null
+      fi
     fi
   fi
 
