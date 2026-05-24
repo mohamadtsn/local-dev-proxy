@@ -120,6 +120,20 @@ deploy_certificate_docker() {
   local key_file="$2"
   local crt_file="$3"
 
+  # In ecosystem mode CERT_DIR already points to the volume-mounted ssl dir,
+  # so certs generated there are immediately visible to the container — no
+  # docker cp needed. The ssl mount is read-only from the container's side,
+  # so docker_copy_to_container would fail anyway.
+  if is_ecosystem_active; then
+    success "Certificate deployed via ecosystem volume mount"
+    if check_root; then
+      install_system_certificate "$hostname" "$key_file" "$crt_file" || true
+    else
+      warning "Run with sudo to install certificate to system trust store"
+    fi
+    return 0
+  fi
+
   if ! is_docker_container_running "$DOCKER_CONTAINER_NAME"; then
     error "Docker container is not running: $DOCKER_CONTAINER_NAME"
     return 1
@@ -307,8 +321,12 @@ remove_certificate() {
   case "$mode" in
   docker)
     if is_docker_container_running "$DOCKER_CONTAINER_NAME"; then
-      docker_rm "${DOCKER_SSL_PATH}/${hostname}.key"
-      docker_rm "${DOCKER_SSL_PATH}/${hostname}.crt"
+      # In ecosystem mode the ssl dir is mounted read-only inside the container,
+      # and files were already removed from the host side above — skip docker rm.
+      if ! is_ecosystem_active; then
+        docker_rm "${DOCKER_SSL_PATH}/${hostname}.key"
+        docker_rm "${DOCKER_SSL_PATH}/${hostname}.crt"
+      fi
     fi
     ;;
   local)

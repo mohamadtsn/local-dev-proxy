@@ -31,6 +31,19 @@ done
 # When installed as root, the default log path is owned by root.
 _resolve_log_file
 
+# Detect public-services ecosystem via docker inspect.
+# If nginx-main has volume-mounted conf/ssl dirs, override CERT_DIR and
+# SITE_ENABLED_DIR to those host paths so files are written there directly —
+# no docker cp and no root required for config/cert management.
+if is_docker_available 2>/dev/null; then
+    if detect_ecosystem 2>/dev/null; then
+        [[ -n "${ECOSYSTEM_SSL_DIR:-}" && -d "$ECOSYSTEM_SSL_DIR" ]] \
+            && export CERT_DIR="$ECOSYSTEM_SSL_DIR"
+        [[ -n "${ECOSYSTEM_CONF_DIR:-}" && -d "$ECOSYSTEM_CONF_DIR" ]] \
+            && export SITE_ENABLED_DIR="$ECOSYSTEM_CONF_DIR"
+    fi
+fi
+
 # Ensure required directories exist
 ensure_directory "$CERT_DIR"
 ensure_directory "$SITE_ENABLED_DIR"
@@ -602,6 +615,18 @@ cmd_show_config() {
     echo -e "  Log File          $LOG_FILE"
     echo -e "  Default IP        $DEFAULT_IP"
     echo -e "  SSL Default       $DEFAULT_SSL_ENABLED"
+    echo ""
+
+    echo -e "  ${COLOR_BOLD}Ecosystem (public-services)${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    if is_ecosystem_active 2>/dev/null; then
+        echo -e "  Status            ${COLOR_GREEN}● detected${COLOR_RESET}  ${COLOR_DIM}(volume-mounted, no docker cp)${COLOR_RESET}"
+        echo -e "  Conf Dir          ${ECOSYSTEM_CONF_DIR:-}"
+        echo -e "  SSL Dir           ${ECOSYSTEM_SSL_DIR:-}"
+    else
+        echo -e "  Status            ${COLOR_DIM}○ not detected${COLOR_RESET}"
+        echo -e "  ${COLOR_DIM}Set ECOSYSTEM_AUTO_DETECT=false to disable detection.${COLOR_RESET}"
+    fi
     echo ""
 
     echo -e "  ${COLOR_BOLD}User Config${COLOR_RESET}"

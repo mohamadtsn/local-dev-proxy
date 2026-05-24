@@ -33,7 +33,12 @@ detect_os() {
 # Resolve a writable log file path — called once at startup before any log() call.
 # If LOG_FILE is not writable (e.g., installed as root), falls back to user-space.
 _resolve_log_file() {
-    if true >> "$LOG_FILE" 2>/dev/null; then
+    local log_dir
+    log_dir="$(dirname "$LOG_FILE")"
+    # Use -w test instead of a redirect; bash prints redirect errors before
+    # 2>/dev/null takes effect, so the redirect trick leaks error output.
+    if { [[ -f "$LOG_FILE" ]] && [[ -w "$LOG_FILE" ]]; } || \
+       { [[ ! -f "$LOG_FILE" ]] && [[ -w "$log_dir" ]]; }; then
         return 0
     fi
     local fallback_dir="${XDG_STATE_HOME:-$HOME/.local/state}/local-dev-proxy"

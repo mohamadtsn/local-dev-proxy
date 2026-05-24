@@ -18,12 +18,14 @@ Works on **Linux**, **macOS**, and **Windows** (Git Bash / WSL).
 
 ## Prerequisites
 
-| Requirement | Docker mode | Local mode |
-|-------------|-------------|------------|
-| Docker + Nginx container | required | — |
-| System Nginx | — | required |
-| OpenSSL | required | required |
-| sudo / admin access | — | required |
+| Requirement | Docker mode | Docker + ecosystem | Local mode |
+|-------------|-------------|-------------------|------------|
+| Docker + Nginx container | required | required | — |
+| System Nginx | — | — | required |
+| OpenSSL | required | required | required |
+| sudo / admin access | — | only for hosts file & system trust | required |
+
+> **Ecosystem mode** is detected automatically when using [public-services-containers](https://github.com/mohamadtsn/public-services-containers) — see [Ecosystem (public-services)](#ecosystem-public-services) below.
 
 ## Installation
 
@@ -135,6 +137,29 @@ Show current configuration and all resolved paths.
 
 **local** — uses system-installed Nginx. Requires root for configuration writes.
 
+## Ecosystem (public-services)
+
+When [public-services-containers](https://github.com/mohamadtsn/public-services-containers) is running, `devproxy` detects it automatically via `docker inspect` and switches to **ecosystem mode**:
+
+- Nginx site configs are written directly to the container's volume-mounted conf directory (`nginx/site-enabled/`) on the host — no `docker cp`.
+- SSL certificates are written directly to the volume-mounted ssl directory (`nginx/certificates/`) — no `docker cp`.
+- Neither operation requires `sudo` (the mounted directories are owned by your user).
+- `nginx -s reload` is still executed inside the container to pick up changes.
+
+Detection is based on the volume mounts of the configured nginx container (`DOCKER_CONTAINER_NAME`, default `nginx-main`). No extra configuration is needed.
+
+```
+devproxy config     # shows "Ecosystem: ● detected" with the resolved paths
+```
+
+To disable ecosystem detection:
+```bash
+# ~/.local-dev-proxy.conf
+export ECOSYSTEM_AUTO_DETECT="false"
+```
+
+> **Note:** Installing a certificate to the system trust store still requires `sudo`. Only Nginx config and cert file management are handled without root in ecosystem mode.
+
 ## Configuration
 
 Create `~/.local-dev-proxy.conf` to override defaults:
@@ -169,6 +194,9 @@ export SITE_ENABLED_DIR="/custom/path/sites"
 
 export AUTO_RELOAD="true"
 export BACKUP_CONFIGS="true"
+
+# Ecosystem integration
+export ECOSYSTEM_AUTO_DETECT="true"    # set to "false" to disable
 ```
 
 ## Templates
@@ -237,6 +265,16 @@ devproxy mode --mode local      # switch to local Nginx instead
 devproxy nginx test
 docker logs nginx-main          # Docker mode
 sudo journalctl -u nginx        # Local mode (Linux)
+```
+
+**Permission denied writing certificates or configs (Docker mode):**
+
+If `devproxy` is installed system-wide (as root) and you run it without `sudo` in Docker mode, it may fail to write to the system install directories. The recommended fix is to use [public-services-containers](https://github.com/mohamadtsn/public-services-containers) as the nginx provider — ecosystem mode writes directly to the user-owned volume-mounted directories.
+
+If you prefer to keep separate directories, set user-writable paths in `~/.local-dev-proxy.conf`:
+```bash
+export CERT_DIR="$HOME/.local/share/devproxy/certificates"
+export SITE_ENABLED_DIR="$HOME/.local/share/devproxy/sites-enabled"
 ```
 
 **Windows Git Bash: `devproxy` not found after install:**

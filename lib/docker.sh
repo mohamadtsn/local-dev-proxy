@@ -165,6 +165,46 @@ docker_nginx_test() {
   fi
 }
 
+# ─── Ecosystem detection (public-services integration) ───────────────────────
+
+# Return the host-side source path of a volume mounted at $destination in $container.
+_get_container_mount_source() {
+    local container="$1"
+    local destination="$2"
+    docker inspect "$container" \
+        --format '{{range .Mounts}}{{if eq .Destination "'"$destination"'"}}{{.Source}}{{end}}{{end}}' 2>/dev/null
+}
+
+# Detect a compatible ecosystem (e.g. public-services) by inspecting the nginx
+# container's volume mounts. When /etc/nginx/conf.d and/or /etc/nginx/ssl are
+# volume-mounted, exports ECOSYSTEM_CONF_DIR / ECOSYSTEM_SSL_DIR and returns 0.
+# Set ECOSYSTEM_AUTO_DETECT=false in ~/.local-dev-proxy.conf to disable.
+detect_ecosystem() {
+    if [[ "${ECOSYSTEM_AUTO_DETECT:-true}" != "true" ]]; then
+        return 1
+    fi
+    if ! is_docker_container_running "$DOCKER_CONTAINER_NAME"; then
+        return 1
+    fi
+
+    local conf_dir ssl_dir
+    conf_dir=$(_get_container_mount_source "$DOCKER_CONTAINER_NAME" "/etc/nginx/conf.d")
+    ssl_dir=$(_get_container_mount_source "$DOCKER_CONTAINER_NAME" "/etc/nginx/ssl")
+
+    if [[ -z "$conf_dir" && -z "$ssl_dir" ]]; then
+        return 1
+    fi
+
+    [[ -n "$conf_dir" ]] && export ECOSYSTEM_CONF_DIR="$conf_dir"
+    [[ -n "$ssl_dir" ]] && export ECOSYSTEM_SSL_DIR="$ssl_dir"
+    return 0
+}
+
+# Returns 0 if ecosystem was detected and its conf dir is accessible on disk.
+is_ecosystem_active() {
+    [[ -n "${ECOSYSTEM_CONF_DIR:-}" ]] && [[ -d "$ECOSYSTEM_CONF_DIR" ]]
+}
+
 # Reload nginx in Docker
 docker_nginx_reload() {
   local container="${1:-$DOCKER_CONTAINER_NAME}"

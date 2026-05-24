@@ -182,6 +182,13 @@ deploy_config_docker() {
   local domain="$1"
   local config_file="$2"
 
+  # In ecosystem mode SITE_ENABLED_DIR already points to the volume-mounted nginx
+  # conf dir, so the file written there is immediately visible to the container.
+  if is_ecosystem_active; then
+    success "Configuration deployed via ecosystem volume mount"
+    return 0
+  fi
+
   info "Deploying configuration to Docker container..."
 
   # Ensure directory exists in container
@@ -245,7 +252,11 @@ remove_site_config() {
   # Remove from nginx
   case "$mode" in
   docker)
-    docker_rm "${DOCKER_CONF_PATH}/${domain}.conf"
+    # In ecosystem mode the file was already removed from the host-mounted conf dir
+    # above; exec into the container is unnecessary (and the path may not exist).
+    if ! is_ecosystem_active; then
+      docker_rm "${DOCKER_CONF_PATH}/${domain}.conf"
+    fi
     ;;
   local)
     if check_root; then
