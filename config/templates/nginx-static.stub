@@ -1,0 +1,61 @@
+# config/templates/nginx-static.stub
+# Static site configuration with HTTPS (redirects HTTP to HTTPS)
+# Suitable for React, Vue, HTML builds, and other static assets.
+# Use {{STATIC_ROOT}} placeholder for the document root path.
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name {{DOMAIN}};
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+
+    server_name {{DOMAIN}};
+
+    root {{STATIC_ROOT}};
+    index index.html index.htm;
+
+    # SSL Configuration
+    ssl_certificate {{SSL_DIR}}/{{CERTIFICATE_NAME_FILE}}.crt;
+    ssl_certificate_key {{SSL_DIR}}/{{CERTIFICATE_NAME_FILE}}.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers off;
+
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=63072000" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml+rss application/atom+xml image/svg+xml;
+
+    # SPA routing — fall back to index.html for client-side routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Long-term cache for hashed static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+}

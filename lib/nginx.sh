@@ -329,6 +329,96 @@ reload_nginx() {
   esac
 }
 
+# Create nginx static site configuration (no upstream proxy — serves files directly)
+create_static_config() {
+  local domain="$1"
+  local static_root="$2"
+  local cert_domain="${3:-$domain}"
+  local ssl_enabled="${4:-$DEFAULT_SSL_ENABLED}"
+
+  if [[ -z "$domain" ]]; then
+    error "Domain is required"
+    return 1
+  fi
+
+  if [[ -z "$static_root" ]]; then
+    error "Static root directory is required (--root)"
+    return 1
+  fi
+
+  # Validate domain
+  domain=$(validate_domain "$domain")
+  if [[ $? -ne 0 ]]; then
+    return 1
+  fi
+
+  local mode=$(determine_proxy_mode)
+  if [[ $? -ne 0 ]]; then
+    return 1
+  fi
+
+  info "Creating static Nginx configuration for: $domain (root: $static_root, SSL: $ssl_enabled)"
+
+  ensure_directory "$SITE_ENABLED_DIR" || return 1
+
+  local config_file="${SITE_ENABLED_DIR}/${domain}.conf"
+
+  # Select appropriate static template
+  local template_name="nginx-static"
+  [[ "$ssl_enabled" == "false" ]] && template_name="nginx-static-http"
+
+  # Allow override via CUSTOM_TEMPLATE_PATH
+  local template_file
+  if [[ -n "$CUSTOM_TEMPLATE_PATH" ]]; then
+    if [[ -f "$CUSTOM_TEMPLATE_PATH" ]]; then
+      template_file="$CUSTOM_TEMPLATE_PATH"
+    else
+      warning "Custom template not found: $CUSTOM_TEMPLATE_PATH"
+      return 1
+    fi
+  else
+    template_file="${TEMPLATE_DIR}/${template_name}.stub"
+    if [[ ! -f "$template_file" ]]; then
+      error "Template not found: $template_file"
+      return 1
+    fi
+  fi
+
+  # Backup existing config if present
+  if [[ -f "$config_file" ]] && [[ "$BACKUP_CONFIGS" == "true" ]]; then
+    cp "$config_file" "${config_file}.bak.$(date +%Y%m%d_%H%M%S)"
+    info "Backed up existing configuration"
+  fi
+
+  cp "$template_file" "$config_file"
+
+  sed -i.tmp "s|{{DOMAIN}}|$domain|g" "$config_file"
+  sed -i.tmp "s|{{CERTIFICATE_NAME_FILE}}|$cert_domain|g" "$config_file"
+  sed -i.tmp "s|{{STATIC_ROOT}}|$static_root|g" "$config_file"
+  sed -i.tmp "s|{{SSL_DIR}}|$(get_nginx_ssl_dir)|g" "$config_file"
+  rm -f "${config_file}.tmp"
+
+  success "Static configuration created: $config_file"
+
+  # Deploy configuration based on mode
+  case "$mode" in
+  docker)
+    deploy_config_docker "$domain" "$config_file"
+    ;;
+  local)
+    deploy_config_local "$domain" "$config_file"
+    ;;
+  esac
+
+  local result=$?
+
+  if [[ $result -eq 0 ]] && [[ "$AUTO_RELOAD" == "true" ]]; then
+    reload_nginx
+  fi
+
+  return $result
+}
+
 # List nginx site configurations
 list_site_configs() {
   info "Nginx site configurations:"
@@ -337,16 +427,20 @@ list_site_configs() {
     find "$SITE_ENABLED_DIR" -name "*.conf" -type f | while read -r conf; do
       local name=$(basename "$conf" .conf)
 
-      # Try to extract port from config
-      local port=$(grep -m1 "proxy_pass" "$conf" | grep -o ':[0-9]*' | tail -1 | tr -d ':' 2>/dev/null || echo "N/A")
-
-      # Check if SSL enabled
-      local ssl_status="No SSL"
-      if grep -q "ssl_certificate" "$conf"; then
-        ssl_status="SSL"
+      # Detect static vs proxy config
+      if grep -q "^\s*root " "$conf" && ! grep -q "proxy_pass" "$conf"; then
+        local root_path
+        root_path=$(grep -m1 "^\s*root " "$conf" | awk '{print $2}' | tr -d ';' 2>/dev/null || echo "N/A")
+        local ssl_status="No SSL"
+        grep -q "ssl_certificate" "$conf" && ssl_status="SSL"
+        echo "  - $name (static: $root_path, $ssl_status)"
+      else
+        local port
+        port=$(grep -m1 "proxy_pass" "$conf" | grep -o ':[0-9]*' | tail -1 | tr -d ':' 2>/dev/null || echo "N/A")
+        local ssl_status="No SSL"
+        grep -q "ssl_certificate" "$conf" && ssl_status="SSL"
+        echo "  - $name (port: $port, $ssl_status)"
       fi
-
-      echo "  - $name (port: $port, $ssl_status)"
     done
   else
     warning "Site configuration directory not found"

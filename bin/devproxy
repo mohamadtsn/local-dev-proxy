@@ -86,6 +86,7 @@ usage() {
     echo -e "  ${COLOR_BOLD}NGINX${COLOR_RESET}"
     echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
     echo -e "    ${COLOR_CYAN}nginx create-site${COLOR_RESET}   Create site configuration"
+    echo -e "    ${COLOR_CYAN}nginx create-static${COLOR_RESET} Create static site configuration"
     echo -e "    ${COLOR_CYAN}nginx remove-site${COLOR_RESET}   Remove site configuration"
     echo -e "    ${COLOR_CYAN}nginx list${COLOR_RESET}          List all site configurations"
     echo -e "    ${COLOR_CYAN}nginx test${COLOR_RESET}          Test Nginx configuration"
@@ -110,6 +111,9 @@ usage() {
     echo -e "        ${COLOR_CYAN}--ssl${COLOR_RESET}                Enable SSL ${COLOR_DIM}(default)${COLOR_RESET}"
     echo -e "        ${COLOR_CYAN}--template${COLOR_RESET} PATH       Custom Nginx template"
     echo -e "        ${COLOR_CYAN}--mode${COLOR_RESET} MODE           Proxy mode: docker, local, auto"
+    echo -e "        ${COLOR_CYAN}--static${COLOR_RESET}              Serve static files (no upstream proxy)"
+    echo -e "        ${COLOR_CYAN}--root${COLOR_RESET} PATH           Document root for static sites"
+    echo -e "    ${COLOR_CYAN}-v, --version${COLOR_RESET}            Show version and exit"
     echo ""
 
     echo -e "  ${COLOR_BOLD}EXAMPLES${COLOR_RESET}"
@@ -119,6 +123,9 @@ usage() {
     echo ""
     echo -e "    ${COLOR_DIM}# Create subdomain (shares cert with main domain)${COLOR_RESET}"
     echo -e "    devproxy create ${COLOR_CYAN}-h api.myapp.local -p 8080 -s -m myapp.local${COLOR_RESET}"
+    echo ""
+    echo -e "    ${COLOR_DIM}# Create static site (React/HTML build)${COLOR_RESET}"
+    echo -e "    devproxy create ${COLOR_CYAN}-h myapp.local --static --root /var/www/myapp/dist${COLOR_RESET}"
     echo ""
     echo -e "    ${COLOR_DIM}# Add to hosts file${COLOR_RESET}"
     echo -e "    sudo devproxy hosts add ${COLOR_CYAN}-h myapp.local${COLOR_RESET}"
@@ -142,6 +149,8 @@ parse_args() {
     SSL_ENABLED="$DEFAULT_SSL_ENABLED"
     CUSTOM_TEMPLATE=""
     FORCE_MODE=""
+    IS_STATIC=false
+    STATIC_ROOT=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -152,6 +161,10 @@ parse_args() {
                     SUBCOMMAND="$1"
                     shift
                 fi
+                ;;
+            -v|--version)
+                cat "${BASE_DIR}/VERSION" 2>/dev/null || echo "dev"
+                exit 0
                 ;;
             -h|--host)
                 HOST="$2"
@@ -187,6 +200,14 @@ parse_args() {
                 ;;
             --mode)
                 FORCE_MODE="$2"
+                shift 2
+                ;;
+            --static)
+                IS_STATIC=true
+                shift
+                ;;
+            --root)
+                STATIC_ROOT="$2"
                 shift 2
                 ;;
             --help)
@@ -253,12 +274,23 @@ cmd_create_domain() {
         read -p "Enter domain name: " HOST
     fi
 
+    if [[ -z "$HOST" ]]; then
+        error "Domain is required"
+        exit 1
+    fi
+
+    # Route to static handler when --static flag is set
+    if $IS_STATIC; then
+        _cmd_create_static_domain
+        return
+    fi
+
     if [[ -z "$PORT" ]]; then
         read -p "Enter port number: " PORT
     fi
 
-    if [[ -z "$HOST" ]] || [[ -z "$PORT" ]]; then
-        error "Domain and port are required"
+    if [[ -z "$PORT" ]]; then
+        error "Port is required"
         exit 1
     fi
 
@@ -324,6 +356,82 @@ cmd_create_domain() {
     echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
     echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_DIM}URL:${COLOR_RESET}  ${COLOR_CYAN}${scheme}://${HOST}${COLOR_RESET}"
     echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_DIM}Port:${COLOR_RESET} ${PORT}  ${COLOR_DIM}|  Mode:${COLOR_RESET} $(determine_proxy_mode 2>/dev/null || echo 'N/A')  ${COLOR_DIM}|  SSL:${COLOR_RESET} ${SSL_ENABLED}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}╰─────────────────────────────────────────────────────────╯${COLOR_RESET}"
+    echo ""
+}
+
+# Internal: handle static domain creation (called from cmd_create_domain when --static)
+_cmd_create_static_domain() {
+    if [[ -z "$STATIC_ROOT" ]]; then
+        read -p "Enter static root directory: " STATIC_ROOT
+    fi
+
+    if [[ -z "$STATIC_ROOT" ]]; then
+        error "Static root directory is required (--root)"
+        exit 1
+    fi
+
+    # Determine certificate domain
+    local cert_domain="$HOST"
+    if $IS_SUBDOMAIN && [[ -n "$MAIN_DOMAIN" ]]; then
+        cert_domain="$MAIN_DOMAIN"
+        info "Using main domain certificate: $cert_domain"
+    fi
+
+    info "Creating static domain: $HOST"
+    info "Root: $STATIC_ROOT"
+    info "IP: $IP"
+    info "SSL Enabled: $SSL_ENABLED"
+
+    # Generate certificate if SSL is enabled
+    if [[ "$SSL_ENABLED" == "true" ]]; then
+        info "Certificate domain: $cert_domain"
+
+        if [[ -f "${CERT_DIR}/${cert_domain}.crt" ]]; then
+            warning "Certificate already exists for: $cert_domain"
+            if ! confirm "Regenerate certificate?"; then
+                info "Using existing certificate"
+            else
+                if ! generate_certificate "$cert_domain"; then
+                    error "Failed to generate certificate"
+                    exit 1
+                fi
+            fi
+        else
+            if ! generate_certificate "$cert_domain"; then
+                error "Failed to generate certificate"
+                exit 1
+            fi
+        fi
+    else
+        info "Skipping certificate generation (SSL disabled)"
+    fi
+
+    # Create static nginx configuration
+    if ! create_static_config "$HOST" "$STATIC_ROOT" "$cert_domain" "$SSL_ENABLED"; then
+        error "Failed to create static site configuration"
+        exit 1
+    fi
+
+    # Add to hosts file
+    if check_root; then
+        add_host "$IP" "$HOST"
+    else
+        warning "Skipping hosts file update — run: sudo devproxy hosts add -h $HOST -i $IP"
+    fi
+
+    local scheme="http"
+    [[ "$SSL_ENABLED" == "true" ]] && scheme="https"
+
+    echo ""
+    echo -e "  ${COLOR_GREEN}╭─ Static Site Ready ─────────────────────────────────────╮${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_WHITE}${HOST}${COLOR_RESET} is set up successfully"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_DIM}URL:${COLOR_RESET}   ${COLOR_CYAN}${scheme}://${HOST}${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_DIM}Root:${COLOR_RESET}  ${STATIC_ROOT}"
+    echo -e "  ${COLOR_GREEN}│${COLOR_RESET}  ${COLOR_DIM}Mode:${COLOR_RESET}  $(determine_proxy_mode 2>/dev/null || echo 'N/A')  ${COLOR_DIM}|  SSL:${COLOR_RESET} ${SSL_ENABLED}"
     echo -e "  ${COLOR_GREEN}│${COLOR_RESET}"
     echo -e "  ${COLOR_GREEN}╰─────────────────────────────────────────────────────────╯${COLOR_RESET}"
     echo ""
@@ -444,6 +552,23 @@ cmd_nginx() {
 
             create_site_config "$HOST" "$PORT" "$HOST" "$SSL_ENABLED"
             ;;
+        create-static)
+            if [[ -z "$HOST" ]]; then
+                read -p "Enter domain name: " HOST
+            fi
+            if [[ -z "$STATIC_ROOT" ]]; then
+                read -p "Enter static root directory: " STATIC_ROOT
+            fi
+
+            # Ask about SSL
+            if confirm "Enable SSL for this static site?" "y"; then
+                SSL_ENABLED=true
+            else
+                SSL_ENABLED=false
+            fi
+
+            create_static_config "$HOST" "$STATIC_ROOT" "$HOST" "$SSL_ENABLED"
+            ;;
         remove-site)
             if [[ -z "$HOST" ]]; then
                 read -p "Enter domain name: " HOST
@@ -463,7 +588,7 @@ cmd_nginx() {
             ;;
         *)
             error "Unknown nginx subcommand: $SUBCOMMAND"
-            echo "Available subcommands: create-site, remove-site, list, test, reload"
+            echo "Available subcommands: create-site, create-static, remove-site, list, test, reload"
             exit 1
             ;;
     esac

@@ -29,8 +29,8 @@ add_host() {
     return 1
   fi
 
-  # Remove existing entry if present
-  remove_host "$hostname" &> /dev/null
+  # Remove existing entry if present — ignore failure (entry may not exist yet)
+  remove_host "$hostname" &> /dev/null || true
 
   # Add new entry
   echo "$ip_address $hostname" >> "$HOSTS_FILE"
@@ -77,10 +77,12 @@ flush_dns_cache() {
 
   case "$os" in
   linux)
-    if command_exists systemd-resolve; then
-      systemd-resolve --flush-caches 2>/dev/null
+    if command_exists resolvectl; then
+      resolvectl flush-caches 2>/dev/null || true
+    elif command_exists systemd-resolve; then
+      systemd-resolve --flush-caches 2>/dev/null || true
     elif command_exists nscd; then
-      nscd -i hosts 2>/dev/null
+      nscd -i hosts 2>/dev/null || true
     fi
     ;;
   macos)

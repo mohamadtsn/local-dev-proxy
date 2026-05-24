@@ -1,0 +1,33 @@
+# config/templates/nginx-static-http.stub
+# Static site configuration — HTTP only (no SSL)
+# Suitable for React, Vue, HTML builds, and other static assets.
+# Use {{STATIC_ROOT}} placeholder for the document root path.
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name {{DOMAIN}};
+
+    root {{STATIC_ROOT}};
+    index index.html index.htm;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml+rss application/atom+xml image/svg+xml;
+
+    # SPA routing — fall back to index.html for client-side routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Long-term cache for hashed static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+}
