@@ -8,6 +8,7 @@ complete -c devproxy -f
 # Top-level commands
 complete -c devproxy -n '__fish_use_subcommand' -a 'create'     -d 'Create a new domain with proxy configuration'
 complete -c devproxy -n '__fish_use_subcommand' -a 'remove'     -d 'Remove a domain and its configuration'
+complete -c devproxy -n '__fish_use_subcommand' -a 'update'     -d 'Check for updates and install if available'
 complete -c devproxy -n '__fish_use_subcommand' -a 'cert'       -d 'Manage SSL certificates'
 complete -c devproxy -n '__fish_use_subcommand' -a 'hosts'      -d 'Manage /etc/hosts entries'
 complete -c devproxy -n '__fish_use_subcommand' -a 'nginx'      -d 'Manage nginx site configurations'

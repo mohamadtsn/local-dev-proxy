@@ -19,6 +19,7 @@ _devproxy() {
             local commands=(
                 'create:create a new domain with proxy configuration'
                 'remove:remove a domain and its configuration'
+                'update:check for updates and install if available'
                 'cert:manage SSL certificates'
                 'hosts:manage /etc/hosts entries'
                 'nginx:manage nginx site configurations'

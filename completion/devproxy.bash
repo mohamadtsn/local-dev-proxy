@@ -47,7 +47,7 @@ _devproxy() {
 
     case "$command" in
         "")
-            local top_cmds="create remove cert hosts nginx mode config help completion"
+            local top_cmds="create remove update cert hosts nginx mode config help completion"
             COMPREPLY=($(compgen -W "$top_cmds -v --version --help" -- "$cur"))
             ;;
 
@@ -104,7 +104,7 @@ _devproxy() {
             COMPREPLY=($(compgen -W "--mode --help" -- "$cur"))
             ;;
 
-        config|help)
+        update|config|help)
             COMPREPLY=($(compgen -W "--help" -- "$cur"))
             ;;
 

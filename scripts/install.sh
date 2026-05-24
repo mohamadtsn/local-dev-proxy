@@ -6,6 +6,13 @@ set -e
 REPO="mohamadtsn/local-dev-proxy"
 BRANCH="master"
 VERSION="${VERSION:-latest}"
+YES=false
+
+for _arg in "$@"; do
+    case "$_arg" in
+        --yes|-y) YES=true ;;
+    esac
+done
 
 COLOR_GREEN='\033[1;32m'
 COLOR_BLUE='\033[1;34m'
@@ -139,25 +146,29 @@ if [[ "$IS_UPDATE" == "true" ]]; then
         echo -e "  Installed : ${COLOR_GREEN}${CURRENT_DISPLAY}${COLOR_RESET}"
         echo -e "  Available : ${COLOR_YELLOW}${NEW_DISPLAY}${COLOR_RESET} (same version)"
         echo ""
-        read -r -p "  Same version is already installed. Continue anyway? [y/N]: " _confirm
-        _confirm="${_confirm:-n}"
-        if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
-            echo ""
-            echo -e "  ${COLOR_YELLOW}Update cancelled.${COLOR_RESET}"
-            echo ""
-            exit 0
+        if [[ "$YES" != "true" ]]; then
+            read -r -p "  Same version is already installed. Continue anyway? [y/N]: " _confirm
+            _confirm="${_confirm:-n}"
+            if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
+                echo ""
+                echo -e "  ${COLOR_YELLOW}Update cancelled.${COLOR_RESET}"
+                echo ""
+                exit 0
+            fi
         fi
     else
         echo -e "  Installed : ${COLOR_GREEN}${CURRENT_DISPLAY}${COLOR_RESET}"
         echo -e "  Available : ${COLOR_CYAN}${NEW_DISPLAY}${COLOR_RESET}"
         echo ""
-        read -r -p "  Update from ${CURRENT_DISPLAY} → ${NEW_DISPLAY}? [Y/n]: " _confirm
-        _confirm="${_confirm:-y}"
-        if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
-            echo ""
-            echo -e "  ${COLOR_YELLOW}Update cancelled.${COLOR_RESET}"
-            echo ""
-            exit 0
+        if [[ "$YES" != "true" ]]; then
+            read -r -p "  Update from ${CURRENT_DISPLAY} → ${NEW_DISPLAY}? [Y/n]: " _confirm
+            _confirm="${_confirm:-y}"
+            if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
+                echo ""
+                echo -e "  ${COLOR_YELLOW}Update cancelled.${COLOR_RESET}"
+                echo ""
+                exit 0
+            fi
         fi
     fi
     echo ""

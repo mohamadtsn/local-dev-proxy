@@ -69,6 +69,11 @@ usage() {
     echo -e "    ${COLOR_CYAN}remove${COLOR_RESET}              Remove a domain and its configuration"
     echo ""
 
+    echo -e "  ${COLOR_BOLD}MAINTENANCE${COLOR_RESET}"
+    echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
+    echo -e "    ${COLOR_CYAN}update${COLOR_RESET}              Check for updates and install if available"
+    echo ""
+
     echo -e "  ${COLOR_BOLD}CERTIFICATES${COLOR_RESET}"
     echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
     echo -e "    ${COLOR_CYAN}cert generate${COLOR_RESET}       Generate SSL certificate for a domain"
@@ -155,7 +160,7 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-            create|remove|cert|hosts|nginx|mode|config|completion|help)
+            create|remove|update|cert|hosts|nginx|mode|config|completion|help)
                 COMMAND="$1"
                 shift
                 if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
@@ -232,6 +237,9 @@ execute_command() {
             ;;
         remove)
             cmd_remove_domain
+            ;;
+        update)
+            cmd_update
             ;;
         cert)
             cmd_certificate
@@ -416,11 +424,9 @@ _cmd_create_static_domain() {
         exit 1
     fi
 
-    # Add to hosts file
-    if check_root; then
-        add_host "$IP" "$HOST"
-    else
-        warning "Skipping hosts file update — run: sudo devproxy hosts add -h $HOST -i $IP"
+    # Add to hosts file (uses sudo automatically if not root)
+    if ! add_host "$IP" "$HOST"; then
+        warning "Hosts file not updated — run: sudo devproxy hosts add -h $HOST"
     fi
 
     local scheme="http"
@@ -467,17 +473,75 @@ cmd_remove_domain() {
         fi
     fi
 
-    # Remove from hosts file
-    if check_root; then
-        if confirm "Remove from hosts file?"; then
-            remove_host "$HOST"
+    # Remove from hosts file (uses sudo automatically if not root)
+    if confirm "Remove from hosts file?"; then
+        if ! remove_host "$HOST"; then
+            warning "Hosts file not updated — run: sudo devproxy hosts remove -h $HOST"
         fi
-    else
-        warning "Skipping hosts file update (requires root)"
-        info "Run manually: sudo devproxy hosts remove -h $HOST"
     fi
 
     success "Domain removed successfully: $HOST"
+}
+
+# Command: Update devproxy
+cmd_update() {
+    local repo="mohamadtsn/local-dev-proxy"
+    local current_version
+    current_version=$(cat "${BASE_DIR}/VERSION" 2>/dev/null || echo "dev")
+
+    if ! command_exists curl && ! command_exists wget; then
+        error "curl or wget is required to check for updates"
+        exit 1
+    fi
+
+    info "Checking for updates..."
+
+    local latest_tag=""
+    if command_exists curl; then
+        latest_tag=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
+            2>/dev/null | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    else
+        latest_tag=$(wget -qO- "https://api.github.com/repos/${repo}/releases/latest" \
+            2>/dev/null | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    fi
+
+    if [[ -z "$latest_tag" ]]; then
+        error "Failed to fetch latest version from GitHub"
+        exit 1
+    fi
+
+    local latest_version="${latest_tag#v}"
+
+    if [[ "$current_version" == "$latest_version" ]]; then
+        success "Already up to date: v${current_version}"
+        exit 0
+    fi
+
+    echo ""
+    echo -e "  ${COLOR_CYAN}╭─ Update Available ──────────────────────────────────────╮${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_DIM}Installed:${COLOR_RESET}  ${COLOR_WHITE}v${current_version}${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}  ${COLOR_DIM}Available:${COLOR_RESET}  ${COLOR_GREEN}v${latest_version}${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}│${COLOR_RESET}"
+    echo -e "  ${COLOR_CYAN}╰─────────────────────────────────────────────────────────╯${COLOR_RESET}"
+    echo ""
+
+    if ! confirm "Update devproxy to v${latest_version}?"; then
+        info "Update cancelled"
+        exit 0
+    fi
+
+    local install_script="${BASE_DIR}/scripts/install.sh"
+    if [[ ! -f "$install_script" ]]; then
+        error "Install script not found: $install_script"
+        exit 1
+    fi
+
+    if [[ $EUID -ne 0 ]]; then
+        exec sudo bash "$install_script" --yes
+    else
+        bash "$install_script" --yes
+    fi
 }
 
 # Command: Certificate management
