@@ -28,6 +28,34 @@ if [[ -L "$BIN_LINK" ]]; then
   echo -e "${COLOR_GREEN}✓${COLOR_RESET} Removed symbolic link"
 fi
 
+# Remove shell completions
+echo ""
+echo "Removing shell completions..."
+
+_removed_any=false
+
+if [[ -f "/etc/bash_completion.d/devproxy" ]]; then
+  rm -f "/etc/bash_completion.d/devproxy"
+  echo -e "${COLOR_GREEN}✓${COLOR_RESET} Removed bash completion"
+  _removed_any=true
+fi
+
+for d in /usr/local/share/zsh/site-functions \
+          /usr/share/zsh/vendor-completions \
+          /usr/share/zsh/site-functions; do
+  if [[ -f "${d}/_devproxy" ]]; then
+    rm -f "${d}/_devproxy"
+    echo -e "${COLOR_GREEN}✓${COLOR_RESET} Removed zsh completion (${d}/_devproxy)"
+    _removed_any=true
+  fi
+done
+
+if [[ "$_removed_any" == "false" ]]; then
+  echo -e "${COLOR_YELLOW}ℹ${COLOR_RESET} No system completion files found"
+fi
+
+echo -e "${COLOR_YELLOW}ℹ${COLOR_RESET} Fish completion (if installed): rm ~/.config/fish/completions/devproxy.fish"
+
 # Remove installation directory
 if [[ -d "$INSTALL_DIR" ]]; then
   echo ""

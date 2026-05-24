@@ -97,6 +97,7 @@ usage() {
     echo -e "  ${COLOR_DIM}──────────────────────────────────────────────────────${COLOR_RESET}"
     echo -e "    ${COLOR_CYAN}mode${COLOR_RESET}                Show or change proxy mode"
     echo -e "    ${COLOR_CYAN}config${COLOR_RESET}              Show current configuration"
+    echo -e "    ${COLOR_CYAN}completion${COLOR_RESET}          Output shell completion script"
     echo -e "    ${COLOR_CYAN}help${COLOR_RESET}                Show this help message"
     echo ""
 
@@ -154,7 +155,7 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-            create|remove|cert|hosts|nginx|mode|config|help)
+            create|remove|cert|hosts|nginx|mode|config|completion|help)
                 COMMAND="$1"
                 shift
                 if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
@@ -246,6 +247,9 @@ execute_command() {
             ;;
         config)
             cmd_show_config
+            ;;
+        completion)
+            cmd_completion
             ;;
         help|"")
             usage
@@ -761,6 +765,64 @@ cmd_show_config() {
     echo ""
     echo -e "  ${COLOR_DIM}To override settings, edit: ${COLOR_CYAN}~/.local-dev-proxy.conf${COLOR_RESET}"
     echo ""
+}
+
+# Command: Output shell completion script
+cmd_completion() {
+    local shell="${SUBCOMMAND:-}"
+
+    if [[ -z "$shell" ]]; then
+        echo ""
+        echo -e "  ${COLOR_BOLD}Usage:${COLOR_RESET}  devproxy completion ${COLOR_CYAN}<shell>${COLOR_RESET}"
+        echo ""
+        echo -e "  Supported shells: ${COLOR_CYAN}bash  zsh  fish${COLOR_RESET}"
+        echo ""
+        echo -e "  ${COLOR_BOLD}Install examples:${COLOR_RESET}"
+        echo -e "    ${COLOR_DIM}# Bash — add to ~/.bashrc:${COLOR_RESET}"
+        echo -e "    source <(devproxy completion bash)"
+        echo ""
+        echo -e "    ${COLOR_DIM}# Zsh — add to ~/.zshrc (fpath must include the dir):${COLOR_RESET}"
+        echo -e "    devproxy completion zsh > \"\${fpath[1]}/_devproxy\""
+        echo ""
+        echo -e "    ${COLOR_DIM}# Fish:${COLOR_RESET}"
+        echo -e "    devproxy completion fish > ~/.config/fish/completions/devproxy.fish"
+        echo ""
+        return 0
+    fi
+
+    local completion_dir="${BASE_DIR}/completion"
+
+    case "$shell" in
+        bash)
+            if [[ -f "${completion_dir}/devproxy.bash" ]]; then
+                cat "${completion_dir}/devproxy.bash"
+            else
+                error "Bash completion file not found: ${completion_dir}/devproxy.bash"
+                return 1
+            fi
+            ;;
+        zsh)
+            if [[ -f "${completion_dir}/_devproxy" ]]; then
+                cat "${completion_dir}/_devproxy"
+            else
+                error "Zsh completion file not found: ${completion_dir}/_devproxy"
+                return 1
+            fi
+            ;;
+        fish)
+            if [[ -f "${completion_dir}/devproxy.fish" ]]; then
+                cat "${completion_dir}/devproxy.fish"
+            else
+                error "Fish completion file not found: ${completion_dir}/devproxy.fish"
+                return 1
+            fi
+            ;;
+        *)
+            error "Unknown shell: $shell"
+            echo "Supported shells: bash, zsh, fish"
+            return 1
+            ;;
+    esac
 }
 
 # Main execution

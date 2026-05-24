@@ -199,10 +199,11 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$BIN_DIR"
 
 echo "Copying files..."
-cp -r "${BASE_DIR}/bin"     "$INSTALL_DIR/"
-cp -r "${BASE_DIR}/lib"     "$INSTALL_DIR/"
-cp -r "${BASE_DIR}/config"  "$INSTALL_DIR/"
-cp -r "${BASE_DIR}/scripts" "$INSTALL_DIR/"
+cp -r "${BASE_DIR}/bin"        "$INSTALL_DIR/"
+cp -r "${BASE_DIR}/lib"        "$INSTALL_DIR/"
+cp -r "${BASE_DIR}/config"     "$INSTALL_DIR/"
+cp -r "${BASE_DIR}/scripts"    "$INSTALL_DIR/"
+[[ -d "${BASE_DIR}/completion" ]] && cp -r "${BASE_DIR}/completion" "$INSTALL_DIR/"
 
 # Write version file
 if [[ -n "$RESOLVED_TAG" ]]; then
@@ -220,6 +221,51 @@ chmod +x "$INSTALL_DIR/scripts"/*.sh
 
 echo "Creating symbolic link..."
 ln -sf "$INSTALL_DIR/bin/devproxy" "$BIN_LINK"
+
+# ─── Shell completions ────────────────────────────────────────────────────────
+
+install_completions() {
+    local src="${INSTALL_DIR}/completion"
+    [[ -d "$src" ]] || return 0
+
+    echo ""
+    echo "Installing shell completions..."
+
+    # Bash
+    if [[ -d "/etc/bash_completion.d" ]]; then
+        cp "${src}/devproxy.bash" "/etc/bash_completion.d/devproxy"
+        chmod 644 "/etc/bash_completion.d/devproxy"
+        echo -e "  ${COLOR_GREEN}✓${COLOR_RESET} Bash   → /etc/bash_completion.d/devproxy"
+    fi
+
+    # Zsh — try common system-wide fpath directories
+    if command -v zsh &>/dev/null; then
+        local zsh_dir=""
+        for d in /usr/local/share/zsh/site-functions \
+                 /usr/share/zsh/vendor-completions \
+                 /usr/share/zsh/site-functions; do
+            if [[ -d "$d" ]]; then
+                zsh_dir="$d"
+                break
+            fi
+        done
+        # Fall back: create the standard location
+        if [[ -z "$zsh_dir" ]]; then
+            zsh_dir="/usr/local/share/zsh/site-functions"
+            mkdir -p "$zsh_dir"
+        fi
+        cp "${src}/_devproxy" "${zsh_dir}/_devproxy"
+        chmod 644 "${zsh_dir}/_devproxy"
+        echo -e "  ${COLOR_GREEN}✓${COLOR_RESET} Zsh    → ${zsh_dir}/_devproxy"
+    fi
+
+    # Fish is always user-level — print hint instead of installing
+    echo -e "  ${COLOR_BLUE}ℹ${COLOR_RESET} Fish   → devproxy completion fish > ~/.config/fish/completions/devproxy.fish"
+}
+
+if [[ "$PLATFORM" != "windows" ]]; then
+    install_completions
+fi
 
 # Ensure data directories exist (never overwrite user data)
 mkdir -p "$INSTALL_DIR/certificates"

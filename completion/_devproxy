@@ -1,0 +1,165 @@
+#compdef devproxy
+# Zsh completion for devproxy
+# Install: copy to a directory in $fpath (e.g. /usr/local/share/zsh/site-functions/_devproxy)
+# or run: devproxy completion zsh > ~/.zsh/completions/_devproxy
+#   then add: fpath=(~/.zsh/completions $fpath) and autoload -Uz compinit && compinit
+
+_devproxy() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '(-v --version)'{-v,--version}'[show version and exit]' \
+        '--help[show help message]' \
+        '1: :->command' \
+        '*:: :->args'
+
+    case $state in
+        command)
+            local commands=(
+                'create:create a new domain with proxy configuration'
+                'remove:remove a domain and its configuration'
+                'cert:manage SSL certificates'
+                'hosts:manage /etc/hosts entries'
+                'nginx:manage nginx site configurations'
+                'mode:show or change proxy mode'
+                'config:show current configuration'
+                'completion:output shell completion script'
+                'help:show help message'
+            )
+            _describe -t commands 'devproxy command' commands
+            ;;
+
+        args)
+            case ${words[1]} in
+                create)
+                    _arguments \
+                        '(-h --host)'{-h,--host}'[domain name]:domain' \
+                        '(-p --port)'{-p,--port}'[port number]:port' \
+                        '(-i --ip)'{-i,--ip}'[IP address (default\: 127.0.0.1)]:ip' \
+                        '(-s --subdomain)'{-s,--subdomain}'[treat as subdomain]' \
+                        '(-m --main-domain)'{-m,--main-domain}'[main domain for subdomain]:domain' \
+                        '--no-ssl[disable SSL]' \
+                        '--ssl[enable SSL (default)]' \
+                        '--template[custom nginx template path]:file:_files' \
+                        '--mode[proxy mode]:mode:(docker local auto)' \
+                        '--static[serve static files — no upstream proxy]' \
+                        '--root[document root for static sites]:directory:_directories' \
+                        '--help[show help]'
+                    ;;
+
+                remove)
+                    _arguments \
+                        '(-h --host)'{-h,--host}'[domain name to remove]:domain' \
+                        '--help[show help]'
+                    ;;
+
+                cert)
+                    local cert_cmds=(
+                        'generate:generate SSL certificate for a domain'
+                        'remove:remove SSL certificate'
+                        'list:list all certificates'
+                    )
+                    _arguments \
+                        '1: :->cert_cmd' \
+                        '*:: :->cert_args'
+
+                    case $state in
+                        cert_cmd)
+                            _describe -t cert-commands 'cert subcommand' cert_cmds
+                            ;;
+                        cert_args)
+                            _arguments \
+                                '(-h --host)'{-h,--host}'[domain name]:domain' \
+                                '--help[show help]'
+                            ;;
+                    esac
+                    ;;
+
+                hosts)
+                    local hosts_cmds=(
+                        'add:add entry to /etc/hosts'
+                        'remove:remove entry from /etc/hosts'
+                        'list:list /etc/hosts entries'
+                    )
+                    _arguments \
+                        '1: :->hosts_cmd' \
+                        '*:: :->hosts_args'
+
+                    case $state in
+                        hosts_cmd)
+                            _describe -t hosts-commands 'hosts subcommand' hosts_cmds
+                            ;;
+                        hosts_args)
+                            _arguments \
+                                '(-h --host)'{-h,--host}'[hostname]:hostname' \
+                                '(-i --ip)'{-i,--ip}'[IP address]:ip' \
+                                '--help[show help]'
+                            ;;
+                    esac
+                    ;;
+
+                nginx)
+                    local nginx_cmds=(
+                        'create-site:create proxy site configuration'
+                        'create-static:create static site configuration (React/HTML)'
+                        'remove-site:remove site configuration'
+                        'list:list all site configurations'
+                        'test:test nginx configuration'
+                        'reload:reload nginx'
+                    )
+                    _arguments \
+                        '1: :->nginx_cmd' \
+                        '*:: :->nginx_args'
+
+                    case $state in
+                        nginx_cmd)
+                            _describe -t nginx-commands 'nginx subcommand' nginx_cmds
+                            ;;
+                        nginx_args)
+                            case ${words[1]} in
+                                create-site)
+                                    _arguments \
+                                        '(-h --host)'{-h,--host}'[domain name]:domain' \
+                                        '(-p --port)'{-p,--port}'[port number]:port' \
+                                        '--no-ssl[disable SSL]' \
+                                        '--ssl[enable SSL]' \
+                                        '--template[custom template]:file:_files' \
+                                        '--mode[proxy mode]:mode:(docker local auto)' \
+                                        '--help[show help]'
+                                    ;;
+                                create-static)
+                                    _arguments \
+                                        '(-h --host)'{-h,--host}'[domain name]:domain' \
+                                        '--root[document root directory]:directory:_directories' \
+                                        '--no-ssl[disable SSL]' \
+                                        '--ssl[enable SSL]' \
+                                        '--template[custom template]:file:_files' \
+                                        '--help[show help]'
+                                    ;;
+                                remove-site)
+                                    _arguments \
+                                        '(-h --host)'{-h,--host}'[domain name]:domain' \
+                                        '--help[show help]'
+                                    ;;
+                            esac
+                            ;;
+                    esac
+                    ;;
+
+                mode)
+                    _arguments \
+                        '--mode[set proxy mode]:mode:(docker local auto)' \
+                        '--help[show help]'
+                    ;;
+
+                completion)
+                    local shells=('bash:bash completion script' 'zsh:zsh completion script' 'fish:fish completion script')
+                    _describe -t shells 'shell' shells
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_devproxy

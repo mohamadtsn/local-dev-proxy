@@ -164,6 +164,33 @@ test-docker: ## Run tests with Docker environment
 		exit 1; \
 	fi
 
+##@ Completions
+
+install-completions: ## Install shell completions system-wide (requires sudo)
+	@echo "$(CYAN)Installing shell completions...$(RESET)"
+	@if [ -d "/etc/bash_completion.d" ]; then \
+		cp completion/devproxy.bash /etc/bash_completion.d/devproxy; \
+		chmod 644 /etc/bash_completion.d/devproxy; \
+		echo "$(GREEN)✓ Bash → /etc/bash_completion.d/devproxy$(RESET)"; \
+	fi
+	@for d in /usr/local/share/zsh/site-functions /usr/share/zsh/vendor-completions /usr/share/zsh/site-functions; do \
+		if [ -d "$$d" ]; then \
+			cp completion/_devproxy "$$d/_devproxy"; \
+			chmod 644 "$$d/_devproxy"; \
+			echo "$(GREEN)✓ Zsh  → $$d/_devproxy$(RESET)"; \
+			break; \
+		fi; \
+	done
+	@echo "$(YELLOW)ℹ Fish → devproxy completion fish > ~/.config/fish/completions/devproxy.fish$(RESET)"
+
+uninstall-completions: ## Remove installed shell completions (requires sudo)
+	@echo "$(CYAN)Removing shell completions...$(RESET)"
+	@rm -f /etc/bash_completion.d/devproxy && echo "$(GREEN)✓ Removed bash completion$(RESET)" || true
+	@for d in /usr/local/share/zsh/site-functions /usr/share/zsh/vendor-completions /usr/share/zsh/site-functions; do \
+		rm -f "$$d/_devproxy" 2>/dev/null && echo "$(GREEN)✓ Removed zsh completion ($$d/_devproxy)$(RESET)" || true; \
+	done
+	@echo "$(YELLOW)ℹ Fish: rm ~/.config/fish/completions/devproxy.fish$(RESET)"
+
 ##@ Release
 
 release: ## Bump patch version, commit, tag, and push (triggers GitHub Actions release)
