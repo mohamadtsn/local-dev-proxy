@@ -343,11 +343,9 @@ cmd_create_domain() {
         exit 1
     fi
 
-    # Add to hosts file
-    if check_root; then
-        add_host "$IP" "$HOST"
-    else
-        warning "Skipping hosts file update — run: sudo devproxy hosts add -h $HOST -i $IP"
+    # Add to hosts file (uses sudo tee automatically if not root)
+    if ! add_host "$IP" "$HOST"; then
+        warning "Hosts file not updated — run: sudo devproxy hosts add -h $HOST"
     fi
 
     local scheme="http"

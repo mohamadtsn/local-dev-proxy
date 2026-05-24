@@ -119,7 +119,9 @@ create_site_config() {
     return 1
   fi
 
-  local mode=$(determine_proxy_mode)
+  # Split declaration from assignment so $? captures the function exit code
+  local mode
+  mode=$(determine_proxy_mode)
   if [[ $? -ne 0 ]]; then
     return 1
   fi
@@ -130,7 +132,8 @@ create_site_config() {
   ensure_directory "$SITE_ENABLED_DIR" || return 1
 
   local config_file="${SITE_ENABLED_DIR}/${domain}.conf"
-  local template_file=$(get_template_path "$ssl_enabled")
+  local template_file
+  template_file=$(get_template_path "$ssl_enabled")
 
   if [[ $? -ne 0 ]]; then
     return 1
@@ -169,9 +172,9 @@ create_site_config() {
 
   local result=$?
 
-  # Reload nginx if configured
+  # Reload nginx if configured — failure is non-fatal (config is saved either way)
   if [[ $result -eq 0 ]] && [[ "$AUTO_RELOAD" == "true" ]]; then
-    reload_nginx
+    reload_nginx || warning "Nginx reload failed — configuration saved, reload manually if needed"
   fi
 
   return $result
@@ -352,7 +355,8 @@ create_static_config() {
     return 1
   fi
 
-  local mode=$(determine_proxy_mode)
+  local mode
+  mode=$(determine_proxy_mode)
   if [[ $? -ne 0 ]]; then
     return 1
   fi
@@ -413,7 +417,7 @@ create_static_config() {
   local result=$?
 
   if [[ $result -eq 0 ]] && [[ "$AUTO_RELOAD" == "true" ]]; then
-    reload_nginx
+    reload_nginx || warning "Nginx reload failed — configuration saved, reload manually if needed"
   fi
 
   return $result
