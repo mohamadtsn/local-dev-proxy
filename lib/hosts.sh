@@ -26,7 +26,8 @@ _hosts_write() {
   if check_root; then
     cat "$tmp" > "$HOSTS_FILE"
   elif command_exists sudo; then
-    cat "$tmp" | sudo tee "$HOSTS_FILE" > /dev/null
+    # shellcheck disable=SC2024  # tee writes as root via sudo; < is fine for stdin
+    sudo tee "$HOSTS_FILE" > /dev/null < "$tmp"
   else
     rm -f "$tmp"
     error "Cannot write to hosts file — run with sudo or as root"
