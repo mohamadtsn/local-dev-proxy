@@ -84,6 +84,23 @@ if [[ "$PLATFORM" == "windows" ]]; then
     echo ""
 fi
 
+# ─── Ensure certutil is available (Linux only) ───────────────────────────────
+
+if [[ "$PLATFORM" == "linux" ]] && ! command -v certutil &>/dev/null; then
+    echo -e "${COLOR_YELLOW}certutil not found — installing libnss3-tools...${COLOR_RESET}"
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y libnss3-tools
+    elif command -v dnf &>/dev/null; then
+        dnf install -y nss-tools
+    elif command -v yum &>/dev/null; then
+        yum install -y nss-tools
+    elif command -v pacman &>/dev/null; then
+        pacman -Sy --noconfirm nss
+    else
+        echo -e "${COLOR_YELLOW}Warning: Could not install certutil automatically. Install libnss3-tools manually for HTTPS trust support.${COLOR_RESET}"
+    fi
+fi
+
 # ─── Resolve source (local clone or remote) ──────────────────────────────────
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"

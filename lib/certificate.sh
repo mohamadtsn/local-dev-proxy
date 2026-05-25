@@ -214,36 +214,99 @@ install_system_certificate() {
 
   case "$os" in
   linux)
-  # Copy to system directories
+    # ----------------------------------------------------------------
+    # 1. System CA trust store
+    #    Must go to /usr/local/share/ca-certificates/ so
+    #    update-ca-certificates picks it up and symlinks it into
+    #    /etc/ssl/certs/ — copying directly to /etc/ssl/certs/ is
+    #    not enough (it gets overwritten on next update run).
+    # ----------------------------------------------------------------
+    local system_ca_dir="/usr/local/share/ca-certificates"
+    if [[ -d "$system_ca_dir" ]]; then
+      cp "$crt_file" "${system_ca_dir}/${hostname}.crt" 2>/dev/null
+      chmod 644 "${system_ca_dir}/${hostname}.crt" 2>/dev/null
+    fi
+
+    # Keep copies in the legacy dirs if they're configured
     if [[ -d "$SYSTEM_SSL_KEY_DIR" ]]; then
       cp "$key_file" "${SYSTEM_SSL_KEY_DIR}/${hostname}.key" 2>/dev/null
       chmod 600 "${SYSTEM_SSL_KEY_DIR}/${hostname}.key" 2>/dev/null
     fi
-
     if [[ -d "$SYSTEM_SSL_CERT_DIR" ]]; then
       cp "$crt_file" "${SYSTEM_SSL_CERT_DIR}/${hostname}.crt" 2>/dev/null
       chmod 644 "${SYSTEM_SSL_CERT_DIR}/${hostname}.crt" 2>/dev/null
     fi
 
-    # Install to browser certificate database
-    if command_exists certutil; then
-      local nssdb_dir="$(dirname ${BROWSER_CERT_DB#sql:})"
-      if [[ -d "$nssdb_dir" ]]; then
-        # Remove old certificate if exists
-        certutil -d "$BROWSER_CERT_DB" -D -n "$hostname" 2>/dev/null
-        # Add new certificate
-        if certutil -d "$BROWSER_CERT_DB" -A -t "CT,c,c" -n "$hostname" \
-          -i "$crt_file" 2>/dev/null; then
-          success "Certificate installed to browser database"
-        fi
-      fi
+    # Rebuild system trust bundle
+    if command_exists update-ca-certificates; then
+      update-ca-certificates 2>/dev/null && success "System CA store updated"
+    elif command_exists update-ca-trust; then
+      update-ca-trust extract 2>/dev/null && success "System CA store updated"
     fi
 
-    # Update CA certificates
-    if command_exists update-ca-certificates; then
-      update-ca-certificates 2>/dev/null
-    elif command_exists update-ca-trust; then
-      update-ca-trust 2>/dev/null
+    # ----------------------------------------------------------------
+    # 2. Browser NSS databases — requires libnss3-tools (certutil)
+    #
+    #    When the script runs via sudo, $HOME = /root, which is wrong.
+    #    Resolve the real user's home from SUDO_USER when available.
+    # ----------------------------------------------------------------
+    if ! command_exists certutil; then
+      warning "certutil not found — run: sudo apt install libnss3-tools"
+    else
+      # Determine the actual user's home directory
+      local real_home
+      if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        real_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+      else
+        real_home="$HOME"
+      fi
+
+      # -- 2a. Chrome & Edge (share the same NSS db on Linux) ----------
+      local chrome_db_dir="${real_home}/.pki/nssdb"
+      local chrome_db="sql:${chrome_db_dir}"
+
+      # Create the database if it doesn't exist yet
+      if [[ ! -d "$chrome_db_dir" ]]; then
+        mkdir -p "$chrome_db_dir"
+        certutil -d "$chrome_db" -N --empty-password 2>/dev/null
+      fi
+
+      if [[ -d "$chrome_db_dir" ]]; then
+        certutil -d "$chrome_db" -D -n "$hostname" 2>/dev/null
+        # Trust flags: CT,, = trusted root CA for TLS (SSL)
+        # CT,c,c was wrong — lowercase c means "valid but not trusted"
+        if certutil -d "$chrome_db" -A -t "CT,," -n "$hostname" \
+          -i "$crt_file" 2>/dev/null; then
+          success "Certificate installed to Chrome/Edge NSS database"
+        else
+          warning "Failed to install certificate to Chrome/Edge NSS database"
+        fi
+      fi
+
+      # -- 2b. Firefox (one NSS db per profile) ------------------------
+      local ff_base="${real_home}/.mozilla/firefox"
+      if [[ -d "$ff_base" ]]; then
+        local ff_count=0
+        # Iterate over every profile directory
+        while IFS= read -r -d '' profile_dir; do
+          # Only touch dirs that actually have an NSS cert database
+          if [[ -f "${profile_dir}/cert9.db" ]] || \
+             [[ -f "${profile_dir}/cert8.db" ]]; then
+            local ff_db="sql:${profile_dir}"
+            certutil -d "$ff_db" -D -n "$hostname" 2>/dev/null
+            if certutil -d "$ff_db" -A -t "CT,," -n "$hostname" \
+              -i "$crt_file" 2>/dev/null; then
+              ((ff_count++))
+            fi
+          fi
+        done < <(find "$ff_base" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
+
+        if [[ $ff_count -gt 0 ]]; then
+          success "Certificate installed to ${ff_count} Firefox profile(s)"
+        else
+          warning "No Firefox profiles found (or Firefox not installed)"
+        fi
+      fi
     fi
     ;;
 
@@ -341,12 +404,36 @@ remove_certificate() {
   if check_root; then
     rm -f "${SYSTEM_SSL_KEY_DIR}/${hostname}.key" 2>/dev/null
     rm -f "${SYSTEM_SSL_CERT_DIR}/${hostname}.crt" 2>/dev/null
+    rm -f "/usr/local/share/ca-certificates/${hostname}.crt" 2>/dev/null
 
-    # Remove from browser database (Linux)
+    if command_exists update-ca-certificates; then
+      update-ca-certificates 2>/dev/null
+    fi
+
+    # Remove from browser NSS databases (Linux)
     if command_exists certutil; then
-      local nssdb_dir="$(dirname ${BROWSER_CERT_DB#sql:})"
-      if [[ -d "$nssdb_dir" ]]; then
-        certutil -d "$BROWSER_CERT_DB" -D -n "$hostname" 2>/dev/null
+      local real_home
+      if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        real_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+      else
+        real_home="$HOME"
+      fi
+
+      # Chrome / Edge
+      local chrome_db="sql:${real_home}/.pki/nssdb"
+      if [[ -d "${real_home}/.pki/nssdb" ]]; then
+        certutil -d "$chrome_db" -D -n "$hostname" 2>/dev/null
+      fi
+
+      # Firefox profiles
+      local ff_base="${real_home}/.mozilla/firefox"
+      if [[ -d "$ff_base" ]]; then
+        while IFS= read -r -d '' profile_dir; do
+          if [[ -f "${profile_dir}/cert9.db" ]] || \
+             [[ -f "${profile_dir}/cert8.db" ]]; then
+            certutil -d "sql:${profile_dir}" -D -n "$hostname" 2>/dev/null
+          fi
+        done < <(find "$ff_base" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
       fi
     fi
   fi
