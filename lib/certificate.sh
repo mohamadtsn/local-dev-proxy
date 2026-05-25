@@ -33,12 +33,19 @@ generate_certificate() {
   # Generate certificate
   show_progress "Generating certificate"
 
+  # Chrome 90+ enforces a maximum validity of 398 days for trusted certificates.
+  local effective_days="$SSL_VALIDITY_DAYS"
+  if [[ "$effective_days" -gt 397 ]]; then
+    effective_days=397
+  fi
+
   if ! openssl req -new -x509 -nodes -sha256 \
-    -days "$SSL_VALIDITY_DAYS" \
+    -days "$effective_days" \
     -newkey rsa:$SSL_KEY_SIZE \
     -keyout "$key_file" \
     -out "$crt_file" \
-    -config "$cnf_file" &>/dev/null; then
+    -config "$cnf_file" \
+    -extensions v3_req &>/dev/null; then
     hide_progress
     error "Failed to generate certificate"
     rm -f "$cnf_file"
@@ -102,8 +109,8 @@ CN = ${hostname}
 
 [v3_req]
 subjectAltName = @alt_names
-basicConstraints = CA:FALSE
-keyUsage = digitalSignature, keyEncipherment
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, digitalSignature, keyEncipherment, keyCertSign, cRLSign
 extendedKeyUsage = serverAuth
 
 [alt_names]
