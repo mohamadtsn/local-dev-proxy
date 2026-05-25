@@ -111,6 +111,10 @@ else
     BASE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
     if [[ ! -f "${BASE_DIR}/bin/devproxy" ]]; then
         REMOTE_INSTALL=true
+    # If the script is running from inside the install dir itself (e.g. devproxy update),
+    # force a remote download so we actually fetch new files instead of copying in-place.
+    elif [[ "$(realpath "$BASE_DIR")" == "$(realpath "$INSTALL_DIR")" ]]; then
+        REMOTE_INSTALL=true
     else
         REMOTE_INSTALL=false
     fi
