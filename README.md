@@ -77,6 +77,9 @@ Options:
   --ssl / --no-ssl          Enable or disable SSL (default: enabled)
   --template PATH           Custom Nginx template
   --mode docker|local|auto  Override proxy mode
+  --static                  Serve static files (no upstream proxy)
+  --root PATH               Document root for static sites
+  --name APP                App name shorthand: resolves to /srv/static/APP
 ```
 
 ```bash
@@ -88,6 +91,12 @@ devproxy create -h myapp.local -p 3000 --template /path/to/custom.stub
 
 # Force local Nginx
 devproxy create -h myapp.local -p 3000 --mode local
+
+# Static site — explicit path
+devproxy create -h myapp.local --static --root /path/to/dist
+
+# Static site — app name shorthand (ecosystem mode: resolves to /srv/static/myapp)
+devproxy create -h myapp.local --static --name myapp
 ```
 
 ### `devproxy cert`
@@ -160,6 +169,82 @@ export ECOSYSTEM_AUTO_DETECT="false"
 
 > **Note:** Installing a certificate to the system trust store still requires `sudo`. Only Nginx config and cert file management are handled without root in ecosystem mode.
 
+## Static Sites
+
+For apps with a backend (Laravel, Node, etc.), `devproxy create -h myapp.local -p 3000` proxies traffic to a running port — no special setup needed. Static sites (React, Vue, plain HTML builds) are different: Nginx must read files directly from a path that exists **inside** the Nginx container.
+
+```bash
+devproxy create -h myapp.local --static --root <path>
+```
+
+The `--root` path must be visible inside the Nginx container. How you achieve that depends on your setup:
+
+### With public-services (ecosystem mode)
+
+[public-services-containers](https://github.com/mohamadtsn/public-services-containers) permanently mounts `nginx/static/` into `nginx-main` at `/srv/static/` (read-only) and provides CLI commands for managing static sites.
+
+**First time setup:**
+
+```bash
+cd ~/projects/myapp && npm run build
+pubservices static-add myapp "$PWD/dist"
+devproxy create -h myapp.local --static --name myapp
+```
+
+**After each rebuild** — just sync again, no `devproxy` step needed:
+
+```bash
+pubservices static-add myapp ~/projects/myapp/dist
+```
+
+`static-add` uses `rsync --delete` (falls back to `cp` if rsync is unavailable), so only changed files are transferred.
+
+**Other static commands:**
+
+```bash
+pubservices static-list                # list all static sites with size
+pubservices static-remove myapp        # remove from nginx/static/
+devproxy remove -h myapp.local         # then clean up the nginx config
+```
+
+**Tip:** point your build tool's output directly to `nginx/static/myapp` to skip the sync step entirely:
+
+```bash
+# Vite
+vite build --outDir /path/to/public-services/nginx/static/myapp
+```
+
+### With local Nginx (local mode)
+
+The path is read directly from the host filesystem, so use the real host path:
+
+```bash
+devproxy create -h myapp.local --static --root /home/youruser/projects/myapp/dist --mode local
+```
+
+### With a custom Docker volume (home-dir mount)
+
+Use `pubservices static-mount` to generate `docker-compose.override.yml` automatically — no manual file editing needed:
+
+```bash
+# Mount $HOME into nginx (default)
+pubservices static-mount
+
+# Or mount a specific directory instead
+pubservices static-mount ~/projects
+
+# Restart nginx to apply
+pubservices run make up-proxy
+
+# Register using the real host path (no copying needed)
+devproxy create -h myapp.local --static --root /home/youruser/projects/myapp/dist
+
+# To undo
+pubservices static-unmount && pubservices run make up-proxy
+```
+
+`docker-compose.override.yml` is git-ignored and merged automatically by Docker Compose on every `up`. Trade-off: mounts the chosen directory read-only into the container.
+
 ## Configuration
 
 Create `~/.local-dev-proxy.conf` to override defaults:
@@ -201,13 +286,20 @@ export ECOSYSTEM_AUTO_DETECT="true"    # set to "false" to disable
 
 ## Templates
 
-Three built-in templates:
+**Proxy templates** (for apps with an upstream port):
 
 | Template | Behavior |
 |----------|----------|
 | `nginx-mixed` | HTTP and HTTPS both work (default) |
 | `nginx-https` | HTTPS only, HTTP redirects to HTTPS |
 | `nginx-http` | HTTP only, no SSL |
+
+**Static templates** (for pre-built HTML/JS/CSS with no upstream port):
+
+| Template | Behavior |
+|----------|----------|
+| `nginx-static` | HTTPS only with SPA routing (`try_files`) and asset caching |
+| `nginx-static-http` | HTTP only version of the above |
 
 **Custom templates** use these placeholders:
 
@@ -221,7 +313,9 @@ server {
 }
 ```
 
-Available placeholders: `{{DOMAIN}}`, `{{PORT}}`, `{{PROXY_HOST}}`, `{{CERTIFICATE_NAME_FILE}}`, `{{SSL_DIR}}`
+Proxy placeholders: `{{DOMAIN}}`, `{{PORT}}`, `{{PROXY_HOST}}`, `{{CERTIFICATE_NAME_FILE}}`, `{{SSL_DIR}}`
+
+Static placeholders: `{{DOMAIN}}`, `{{STATIC_ROOT}}`, `{{CERTIFICATE_NAME_FILE}}`, `{{SSL_DIR}}`
 
 Set a custom template as default:
 ```bash
