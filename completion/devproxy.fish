@@ -56,6 +56,15 @@ complete -c devproxy -n '__fish_seen_subcommand_from create' -l template        
 complete -c devproxy -n '__fish_seen_subcommand_from create' -l mode             -d 'Proxy mode' -r -a 'docker local auto'
 complete -c devproxy -n '__fish_seen_subcommand_from create' -l static           -d 'Serve static files'
 complete -c devproxy -n '__fish_seen_subcommand_from create' -l root             -d 'Document root for static sites' -r -F
+complete -c devproxy -n '__fish_seen_subcommand_from create' -l name             -d 'App name shorthand — resolves to /srv/static/APP' -r
+
+# nginx create-static options
+complete -c devproxy -n '__fish_seen_subcommand_from nginx; and __fish_seen_subcommand_from create-static' -s h -l host  -d 'Domain name' -r
+complete -c devproxy -n '__fish_seen_subcommand_from nginx; and __fish_seen_subcommand_from create-static' -l root        -d 'Document root for static sites' -r -F
+complete -c devproxy -n '__fish_seen_subcommand_from nginx; and __fish_seen_subcommand_from create-static' -l name        -d 'App name shorthand — resolves to /srv/static/APP' -r
+complete -c devproxy -n '__fish_seen_subcommand_from nginx; and __fish_seen_subcommand_from create-static' -l no-ssl      -d 'Disable SSL'
+complete -c devproxy -n '__fish_seen_subcommand_from nginx; and __fish_seen_subcommand_from create-static' -l ssl         -d 'Enable SSL'
+complete -c devproxy -n '__fish_seen_subcommand_from nginx; and __fish_seen_subcommand_from create-static' -l template    -d 'Custom nginx template' -r -F
 
 # remove options
 complete -c devproxy -n '__fish_seen_subcommand_from remove' -s h -l host -d 'Domain name to remove' -r

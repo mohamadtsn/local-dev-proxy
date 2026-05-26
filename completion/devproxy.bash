@@ -36,6 +36,14 @@ _devproxy() {
             COMPREPLY=($(compgen -d -- "$cur"))
             return
             ;;
+        --name)
+            # app name under /srv/static/ — list existing dirs as hints
+            local static_base="/srv/static"
+            if [[ -d "$static_base" ]]; then
+                COMPREPLY=($(compgen -W "$(ls "$static_base" 2>/dev/null)" -- "$cur"))
+            fi
+            return
+            ;;
         -h|--host|-m|--main-domain|-p|--port|-i|--ip)
             return
             ;;
@@ -80,7 +88,7 @@ _devproxy() {
                         COMPREPLY=($(compgen -W "-h --host -p --port --no-ssl --ssl --template --mode --help" -- "$cur"))
                         ;;
                     create-static)
-                        COMPREPLY=($(compgen -W "-h --host --root --no-ssl --ssl --template --help" -- "$cur"))
+                        COMPREPLY=($(compgen -W "-h --host --root --name --no-ssl --ssl --template --help" -- "$cur"))
                         ;;
                     remove-site)
                         COMPREPLY=($(compgen -W "-h --host --help" -- "$cur"))
@@ -93,7 +101,7 @@ _devproxy() {
             ;;
 
         create)
-            COMPREPLY=($(compgen -W "-h --host -p --port -i --ip -s --subdomain -m --main-domain --no-ssl --ssl --template --mode --static --root --help" -- "$cur"))
+            COMPREPLY=($(compgen -W "-h --host -p --port -i --ip -s --subdomain -m --main-domain --no-ssl --ssl --template --mode --static --root --name --help" -- "$cur"))
             ;;
 
         remove)

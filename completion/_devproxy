@@ -46,6 +46,7 @@ _devproxy() {
                         '--mode[proxy mode]:mode:(docker local auto)' \
                         '--static[serve static files — no upstream proxy]' \
                         '--root[document root for static sites]:directory:_directories' \
+                        '--name[app name shorthand — resolves to /srv/static/APP]:app name' \
                         '--help[show help]'
                     ;;
 
@@ -133,6 +134,7 @@ _devproxy() {
                                     _arguments \
                                         '(-h --host)'{-h,--host}'[domain name]:domain' \
                                         '--root[document root directory]:directory:_directories' \
+                                        '--name[app name shorthand — resolves to /srv/static/APP]:app name' \
                                         '--no-ssl[disable SSL]' \
                                         '--ssl[enable SSL]' \
                                         '--template[custom template]:file:_files' \

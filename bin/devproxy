@@ -119,6 +119,7 @@ usage() {
     echo -e "        ${COLOR_CYAN}--mode${COLOR_RESET} MODE           Proxy mode: docker, local, auto"
     echo -e "        ${COLOR_CYAN}--static${COLOR_RESET}              Serve static files (no upstream proxy)"
     echo -e "        ${COLOR_CYAN}--root${COLOR_RESET} PATH           Document root for static sites"
+    echo -e "        ${COLOR_CYAN}--name${COLOR_RESET} APP            App name shorthand: resolves to /srv/static/APP"
     echo -e "    ${COLOR_CYAN}-v, --version${COLOR_RESET}            Show version and exit"
     echo ""
 
@@ -132,6 +133,9 @@ usage() {
     echo ""
     echo -e "    ${COLOR_DIM}# Create static site (React/HTML build)${COLOR_RESET}"
     echo -e "    devproxy create ${COLOR_CYAN}-h myapp.local --static --root /var/www/myapp/dist${COLOR_RESET}"
+    echo ""
+    echo -e "    ${COLOR_DIM}# Create static site via app name (ecosystem mode: /srv/static/myapp)${COLOR_RESET}"
+    echo -e "    devproxy create ${COLOR_CYAN}-h myapp.local --static --name myapp${COLOR_RESET}"
     echo ""
     echo -e "    ${COLOR_DIM}# Add to hosts file${COLOR_RESET}"
     echo -e "    sudo devproxy hosts add ${COLOR_CYAN}-h myapp.local${COLOR_RESET}"
@@ -157,6 +161,7 @@ parse_args() {
     FORCE_MODE=""
     IS_STATIC=false
     STATIC_ROOT=""
+    STATIC_APP_NAME=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -214,6 +219,10 @@ parse_args() {
                 ;;
             --root)
                 STATIC_ROOT="$2"
+                shift 2
+                ;;
+            --name)
+                STATIC_APP_NAME="$2"
                 shift 2
                 ;;
             --help)
@@ -373,12 +382,21 @@ cmd_create_domain() {
 
 # Internal: handle static domain creation (called from cmd_create_domain when --static)
 _cmd_create_static_domain() {
-    if [[ -z "$STATIC_ROOT" ]]; then
-        read -p "Enter static root directory: " STATIC_ROOT
+    # --name myapp  →  /srv/static/myapp  (shorthand for ecosystem/Docker mode)
+    if [[ -z "$STATIC_ROOT" && -n "$STATIC_APP_NAME" ]]; then
+        STATIC_ROOT="/srv/static/${STATIC_APP_NAME}"
     fi
 
     if [[ -z "$STATIC_ROOT" ]]; then
-        error "Static root directory is required (--root)"
+        read -p "Enter static root directory (or app name for /srv/static/<name>): " STATIC_ROOT
+        # Allow bare names like "myapp" to expand to /srv/static/myapp
+        if [[ -n "$STATIC_ROOT" && "$STATIC_ROOT" != /* ]]; then
+            STATIC_ROOT="/srv/static/${STATIC_ROOT}"
+        fi
+    fi
+
+    if [[ -z "$STATIC_ROOT" ]]; then
+        error "Static root directory is required (--root PATH or --name APP)"
         exit 1
     fi
 
@@ -622,8 +640,22 @@ cmd_nginx() {
             if [[ -z "$HOST" ]]; then
                 read -p "Enter domain name: " HOST
             fi
+
+            # --name myapp  →  /srv/static/myapp  (shorthand for ecosystem/Docker mode)
+            if [[ -z "$STATIC_ROOT" && -n "$STATIC_APP_NAME" ]]; then
+                STATIC_ROOT="/srv/static/${STATIC_APP_NAME}"
+            fi
+
             if [[ -z "$STATIC_ROOT" ]]; then
-                read -p "Enter static root directory: " STATIC_ROOT
+                read -p "Enter static root directory (or app name for /srv/static/<name>): " STATIC_ROOT
+                if [[ -n "$STATIC_ROOT" && "$STATIC_ROOT" != /* ]]; then
+                    STATIC_ROOT="/srv/static/${STATIC_ROOT}"
+                fi
+            fi
+
+            if [[ -z "$STATIC_ROOT" ]]; then
+                error "Static root directory is required (--root PATH or --name APP)"
+                exit 1
             fi
 
             # Ask about SSL
