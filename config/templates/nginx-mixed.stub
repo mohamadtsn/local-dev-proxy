@@ -7,27 +7,31 @@ server {
     
     server_name {{DOMAIN}};
     
+    # Upload size limit
+    client_max_body_size 0;
+
     # Proxy Configuration for HTTP
     location / {
         proxy_pass http://{{PROXY_HOST}}:{{PORT}};
-        
+
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Port $server_port;
-        
+
         # WebSocket support
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        
-        # Timeouts
+
+        # Timeouts (increased for large uploads and long-running operations)
         proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+        send_timeout 600s;
+
         # Buffer settings
         proxy_buffering off;
         proxy_buffer_size 4k;
@@ -58,28 +62,32 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
-    
+
+    # Upload size limit
+    client_max_body_size 0;
+
     # Proxy Configuration for HTTPS
     location / {
         proxy_pass http://{{PROXY_HOST}}:{{PORT}};
-        
+
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Port $server_port;
-        
+
         # WebSocket support
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        
-        # Timeouts
+
+        # Timeouts (increased for large uploads and long-running operations)
         proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+        send_timeout 600s;
+
         # Buffer settings
         proxy_buffering off;
         proxy_buffer_size 4k;
