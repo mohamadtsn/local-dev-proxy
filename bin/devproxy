@@ -300,6 +300,14 @@ cmd_create_domain() {
         exit 1
     fi
 
+    # SSL cert installation writes to system trust store — requires root.
+    # Skip this check for subdomains: they reuse the parent cert (no new cert generated).
+    if [[ "$SSL_ENABLED" == "true" ]] && ! $IS_SUBDOMAIN && ! check_root; then
+        warning "SSL certificate installation requires root privileges"
+        info "Re-running with sudo..."
+        exec sudo "$0" "${_ORIG_ARGS[@]}"
+    fi
+
     # Route to static handler when --static flag is set
     if $IS_STATIC; then
         _cmd_create_static_domain
@@ -333,8 +341,9 @@ cmd_create_domain() {
     if [[ "$SSL_ENABLED" == "true" ]]; then
         info "Certificate domain: $cert_domain"
 
-        # Check if certificate already exists
-        if [[ -f "${CERT_DIR}/${cert_domain}.crt" ]]; then
+        if $IS_SUBDOMAIN && [[ -n "$MAIN_DOMAIN" ]]; then
+            info "Subdomain: reusing existing certificate for $cert_domain"
+        elif [[ -f "${CERT_DIR}/${cert_domain}.crt" ]]; then
             warning "Certificate already exists for: $cert_domain"
             if ! confirm "Regenerate certificate?"; then
                 info "Using existing certificate"
@@ -416,7 +425,9 @@ _cmd_create_static_domain() {
     if [[ "$SSL_ENABLED" == "true" ]]; then
         info "Certificate domain: $cert_domain"
 
-        if [[ -f "${CERT_DIR}/${cert_domain}.crt" ]]; then
+        if $IS_SUBDOMAIN && [[ -n "$MAIN_DOMAIN" ]]; then
+            info "Subdomain: reusing existing certificate for $cert_domain"
+        elif [[ -f "${CERT_DIR}/${cert_domain}.crt" ]]; then
             warning "Certificate already exists for: $cert_domain"
             if ! confirm "Regenerate certificate?"; then
                 info "Using existing certificate"
@@ -921,6 +932,7 @@ cmd_completion() {
 
 # Main execution
 main() {
+    _ORIG_ARGS=("$@")
     parse_args "$@"
     execute_command
 }
